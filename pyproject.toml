@@ -1,13 +1,24 @@
 [project]
 name = "patho-bench-dl"
-version = "0.1.0"
-description = "Add your description here"
+version = "0.2.0"
+description = "Unified downloader for Patho-Bench datasets"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "datasets==3.6.0",
+    "datasets>=3.6.0",
     "huggingface-hub>=1.2.1",
     "kaggle>=1.8.2",
     "pandas>=2.3.3",
     "tcia-utils>=3.2.1",
 ]
+
+[project.scripts]
+patho-bench-dl = "patho_bench_dl.cli:main"
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-cov"]
+
+[tool.setuptools.packages.find]
+include = ["patho_bench_dl*"]
+
+
