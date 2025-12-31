@@ -1082,13 +1082,15 @@ wheels = [
 [[package]]
 name = "patho-bench-dl"
 version = "0.2.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "datasets" },
     { name = "huggingface-hub" },
     { name = "kaggle" },
     { name = "pandas" },
+    { name = "requests" },
     { name = "tcia-utils" },
+    { name = "tenacity" },
 ]
 
 [package.optional-dependencies]
@@ -1105,7 +1107,9 @@ requires-dist = [
     { name = "pandas", specifier = ">=2.3.3" },
     { name = "pytest", marker = "extra == 'dev'" },
     { name = "pytest-cov", marker = "extra == 'dev'" },
+    { name = "requests", specifier = ">=2.28.0" },
     { name = "tcia-utils", specifier = ">=3.2.1" },
+    { name = "tenacity", specifier = ">=8.0.0" },
 ]
 provides-extras = ["dev"]
 
@@ -1541,6 +1545,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/3b/18/4f82390c4f3ef95df3ac7ecfecd3ea37bbb1d1100a0c3a6f4ef7d623c490/tcia_utils-3.2.1.tar.gz", hash = "sha256:d5cb7584ef1e80473428db588eee70b3095c9f9fa9f59f9ab65ced05d7b776e1", size = 40097, upload-time = "2025-10-24T01:19:17.98Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/19/d6/df4f1b9c767db7025c27b4d27f025cb0481a624ca10b8a367fc6efaec205/tcia_utils-3.2.1-py3-none-any.whl", hash = "sha256:aaf84225023679cc8ab4a7c6e63442a6c2bb3e9677b93e85bf2bb606c1af19d4", size = 39760, upload-time = "2025-10-24T01:19:16.727Z" },
+]
+
+[[package]]
+name = "tenacity"
+version = "9.1.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/0a/d4/2b0cd0fe285e14b36db076e78c93766ff1d529d70408bd1d2a5a84f1d929/tenacity-9.1.2.tar.gz", hash = "sha256:1169d376c297e7de388d18b4481760d478b0e99a777cad3a9c86e556f4b697cb", size = 48036, upload-time = "2025-04-02T08:25:09.966Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e5/30/643397144bfbfec6f6ef821f36f33e57d35946c44a2352d3c9f0ae847619/tenacity-9.1.2-py3-none-any.whl", hash = "sha256:f77bf36710d8b73a50b2dd155c97b870017ad21afe6ab300326b0371b3b05138", size = 28248, upload-time = "2025-04-02T08:25:07.678Z" },
 ]
 
 [[package]]

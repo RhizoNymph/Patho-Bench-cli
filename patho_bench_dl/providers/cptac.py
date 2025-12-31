@@ -8,6 +8,7 @@ import pandas as pd
 from tcia_utils import pathdb
 
 from patho_bench_dl.providers.base import DatasetProvider
+from patho_bench_dl.utils import download_file_with_retry, DEFAULT_MAX_RETRIES
 
 logging.basicConfig()
 logger = logging.getLogger(__name__)
@@ -138,6 +139,64 @@ class CPTACProvider(DatasetProvider):
             return pd.DataFrame()
         return tcia_images[tcia_images["subjectId"].isin(needed_case_ids)].copy()
     
+    def _get_expected_files(self, images_df: pd.DataFrame) -> dict[str, str]:
+        """
+        Get mapping of expected filenames to their download URLs.
+        
+        Args:
+            images_df: DataFrame with imageUrl column.
+            
+        Returns:
+            Dict mapping filename to URL.
+        """
+        expected = {}
+        if "imageUrl" in images_df.columns:
+            for url in images_df["imageUrl"]:
+                filename = url.split("/")[-1]
+                expected[filename] = url
+        return expected
+    
+    def _retry_failed_downloads(
+        self,
+        expected_files: dict[str, str],
+        output_dir: Path,
+        max_retries: int = DEFAULT_MAX_RETRIES,
+    ) -> tuple[int, int]:
+        """
+        Retry downloading files that are missing from output_dir.
+        
+        Args:
+            expected_files: Dict mapping filename to URL.
+            output_dir: Directory where files should be saved.
+            max_retries: Maximum retry attempts per file.
+            
+        Returns:
+            Tuple of (successfully_recovered, still_failed).
+        """
+        missing = []
+        for filename, url in expected_files.items():
+            filepath = output_dir / filename
+            if not filepath.exists():
+                missing.append((filename, url))
+        
+        if not missing:
+            return 0, 0
+        
+        logger.info(f"Retrying {len(missing)} failed downloads...")
+        recovered = 0
+        failed = 0
+        
+        for filename, url in missing:
+            filepath = output_dir / filename
+            logger.info(f"Retrying: {filename}")
+            if download_file_with_retry(url, filepath, max_retries=max_retries):
+                recovered += 1
+            else:
+                failed += 1
+        
+        logger.info(f"Retry complete. Recovered: {recovered}, Still failed: {failed}")
+        return recovered, failed
+    
     def download_slides(
         self,
         slide_ids: set[str],
@@ -192,8 +251,14 @@ class CPTACProvider(DatasetProvider):
             collection_dir = output_dir / collection
             collection_dir.mkdir(parents=True, exist_ok=True)
             
+            # Get expected files before download for retry tracking
+            expected_files = self._get_expected_files(matched)
+            
             logger.info(f"Downloading {len(matched)} images to {collection_dir}")
             pathdb.downloadImages(matched, path=str(collection_dir))
+            
+            # Retry any failed downloads
+            self._retry_failed_downloads(expected_files, collection_dir)
         
         # Create symlinks if requested
         if create_symlinks and tasks_dir:
@@ -235,8 +300,14 @@ class CPTACProvider(DatasetProvider):
             collection_dir = output_dir / collection
             collection_dir.mkdir(parents=True, exist_ok=True)
             
+            # Get expected files before download for retry tracking
+            expected_files = self._get_expected_files(tcia_images)
+            
             logger.info(f"Downloading ALL {len(tcia_images)} images to {collection_dir}")
             pathdb.downloadImages(tcia_images, path=str(collection_dir))
+            
+            # Retry any failed downloads
+            self._retry_failed_downloads(expected_files, collection_dir)
     
     def _create_symlinks(
         self,

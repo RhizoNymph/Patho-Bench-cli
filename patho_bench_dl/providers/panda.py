@@ -9,8 +9,10 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
+from tenacity import retry, stop_after_attempt, wait_exponential, before_sleep_log
 
 from patho_bench_dl.providers.base import DatasetProvider
+from patho_bench_dl.utils import DEFAULT_MAX_RETRIES
 
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
@@ -102,8 +104,12 @@ class PANDAProvider(DatasetProvider):
         
         return result
     
-    def _download_competition_zip(self, output_dir: Path) -> Path:
-        """Download the full competition zip file."""
+    def _download_competition_zip(
+        self,
+        output_dir: Path,
+        max_retries: int = DEFAULT_MAX_RETRIES,
+    ) -> Path:
+        """Download the full competition zip file with retry on failure."""
         kaggle_cmd = self._get_kaggle_executable()
         zip_name = f"{COMPETITION_NAME}.zip"
         zip_path = output_dir / zip_name
@@ -112,13 +118,22 @@ class PANDAProvider(DatasetProvider):
             logger.info(f"Zip file already exists at {zip_path}")
             return zip_path
         
-        logger.info(f"Downloading competition zip to {output_dir}...")
-        subprocess.run(
-            [kaggle_cmd, "competitions", "download",
-             "-c", COMPETITION_NAME,
-             "-p", str(output_dir)],
-            check=True
+        @retry(
+            stop=stop_after_attempt(max_retries),
+            wait=wait_exponential(multiplier=1, min=4, max=60),
+            before_sleep=before_sleep_log(logger, logging.WARNING),
+            reraise=True,
         )
+        def _do_download():
+            logger.info(f"Downloading competition zip to {output_dir}...")
+            subprocess.run(
+                [kaggle_cmd, "competitions", "download",
+                 "-c", COMPETITION_NAME,
+                 "-p", str(output_dir)],
+                check=True
+            )
+        
+        _do_download()
         return zip_path
     
     def _extract_slides_from_zip(
