@@ -40,9 +40,13 @@ def _auto_register():
     """Import and register all built-in providers."""
     from patho_bench_dl.providers.cptac import CPTACProvider
     from patho_bench_dl.providers.panda import PANDAProvider
+    from patho_bench_dl.providers.imp import IMPProvider
+    from patho_bench_dl.providers.ovarian_bevacizumab import OvarianBevacizumabProvider
     
     register_provider(CPTACProvider())
     register_provider(PANDAProvider())
+    register_provider(IMPProvider())
+    register_provider(OvarianBevacizumabProvider())
 
 
 _auto_register()

@@ -31,6 +31,7 @@ patho-bench-dl list
 # List datasets for a specific provider
 patho-bench-dl list cptac
 patho-bench-dl list panda
+patho-bench-dl list ovarian_bevacizumab
 ```
 
 ### Download slides
@@ -50,6 +51,9 @@ patho-bench-dl download cptac --download --create-symlinks
 
 # Download PANDA slides
 patho-bench-dl download panda --download
+
+# Download Ovarian Bevacizumab Response slides
+patho-bench-dl download ovarian_bevacizumab --download
 ```
 
 ### Full dataset download
@@ -59,6 +63,7 @@ Download entire datasets (not just Patho-Bench slides):
 ```bash
 patho-bench-dl download cptac --full --datasets cptac_ccrcc
 patho-bench-dl download panda --full
+patho-bench-dl download ovarian_bevacizumab --full
 ```
 
 ## Data Sources
@@ -67,6 +72,8 @@ patho-bench-dl download panda --full
 |----------|--------|----------------|
 | `cptac` | [TCIA (The Cancer Imaging Archive)](https://www.cancerimagingarchive.net/) | None |
 | `panda` | [Kaggle Competition](https://www.kaggle.com/c/prostate-cancer-grade-assessment) | `~/.kaggle/kaggle.json` |
+| `imp` | [INESCTEC Open Datasets](https://open-datasets.inesctec.pt/NQ3sxFMZ/IMP-CRS2024-Dataset/) | None |
+| `ovarian_bevacizumab` | [TCIA Ovarian Bevacizumab Response](https://www.cancerimagingarchive.net/collection/ovarian-bevacizumab-response/) | None |
 
 ## Development
 
