@@ -1,22 +1,29 @@
 """IDR (Image Data Resource) dataset provider using BioImage Archive downloads."""
 
+import asyncio
 import logging
 import re
 from pathlib import Path
 from typing import Any
 
+import aiofiles
+import aiohttp
 import pandas as pd
 import requests
-from tenacity import retry, stop_after_attempt, wait_exponential, before_sleep_log
+from aiolimiter import AsyncLimiter
 
 from patho_bench_dl.providers.base import DatasetProvider
-from patho_bench_dl.utils import download_file_with_retry, DEFAULT_MAX_RETRIES
 
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
 
 # BioImage Archive base URL for IDR data
 BIA_BASE_URL = "https://ftp.ebi.ac.uk/biostudies/fire"
+
+# Download settings
+DEFAULT_CONCURRENT_DOWNLOADS = 8
+DEFAULT_RATE_LIMIT = 10  # requests per second
+DEFAULT_CHUNK_SIZE = 1024 * 1024  # 1MB chunks
 
 # Dataset configuration for IDR datasets
 # Maps patho-bench dataset names to BioImage Archive paths
@@ -39,6 +46,21 @@ IDR_DATASETS = {
 
 class IDRProvider(DatasetProvider):
     """Provider for datasets from the Image Data Resource (IDR) via BioImage Archive."""
+    
+    def __init__(
+        self,
+        concurrent_downloads: int = DEFAULT_CONCURRENT_DOWNLOADS,
+        rate_limit: float = DEFAULT_RATE_LIMIT,
+    ):
+        """
+        Initialize the IDR provider.
+        
+        Args:
+            concurrent_downloads: Maximum number of concurrent downloads
+            rate_limit: Maximum requests per second
+        """
+        self.concurrent_downloads = concurrent_downloads
+        self.rate_limit = rate_limit
     
     @property
     def name(self) -> str:
@@ -260,28 +282,118 @@ class IDRProvider(DatasetProvider):
         
         return result
     
-    def _download_file(
+    async def _download_file_async(
         self,
+        session: aiohttp.ClientSession,
+        limiter: AsyncLimiter,
         url: str,
         output_path: Path,
-        max_retries: int = DEFAULT_MAX_RETRIES,
-    ) -> bool:
+        slide_id: str,
+    ) -> tuple[str, bool, str | None]:
         """
-        Download a file from URL with retry support.
+        Download a single file asynchronously with rate limiting.
         
         Args:
+            session: aiohttp client session
+            limiter: Rate limiter
             url: URL to download from
             output_path: Path to save the file
-            max_retries: Maximum retry attempts
+            slide_id: Slide ID for logging
             
         Returns:
-            True if successful, False otherwise
+            Tuple of (slide_id, success, error_message)
         """
-        return download_file_with_retry(
-            url=url,
-            target_path=output_path,
-            max_retries=max_retries,
-        )
+        async with limiter:
+            try:
+                logger.info(f"Downloading {slide_id}...")
+                
+                async with session.get(url) as response:
+                    response.raise_for_status()
+                    
+                    # Get total size for progress
+                    total_size = int(response.headers.get('content-length', 0))
+                    downloaded = 0
+                    
+                    # Write to temp file first for atomicity
+                    temp_path = output_path.with_suffix(output_path.suffix + '.tmp')
+                    
+                    async with aiofiles.open(temp_path, 'wb') as f:
+                        async for chunk in response.content.iter_chunked(DEFAULT_CHUNK_SIZE):
+                            await f.write(chunk)
+                            downloaded += len(chunk)
+                    
+                    # Rename temp to final
+                    temp_path.rename(output_path)
+                    
+                    size_mb = downloaded / (1024 * 1024)
+                    logger.info(f"  Completed {slide_id} ({size_mb:.1f} MB)")
+                    return (slide_id, True, None)
+                    
+            except asyncio.CancelledError:
+                # Clean up temp file on cancellation
+                temp_path = output_path.with_suffix(output_path.suffix + '.tmp')
+                if temp_path.exists():
+                    temp_path.unlink()
+                raise
+            except Exception as e:
+                # Clean up temp file on error
+                temp_path = output_path.with_suffix(output_path.suffix + '.tmp')
+                if temp_path.exists():
+                    temp_path.unlink()
+                error_msg = str(e)
+                logger.error(f"  Failed {slide_id}: {error_msg}")
+                return (slide_id, False, error_msg)
+    
+    async def _download_files_async(
+        self,
+        downloads: list[tuple[str, str, Path]],  # (slide_id, url, output_path)
+    ) -> tuple[int, int, list[str]]:
+        """
+        Download multiple files concurrently.
+        
+        Args:
+            downloads: List of (slide_id, url, output_path) tuples
+            
+        Returns:
+            Tuple of (downloaded_count, failed_count, failed_ids)
+        """
+        limiter = AsyncLimiter(self.rate_limit, 1.0)  # rate_limit requests per second
+        semaphore = asyncio.Semaphore(self.concurrent_downloads)
+        
+        async def bounded_download(session, slide_id, url, output_path):
+            async with semaphore:
+                return await self._download_file_async(
+                    session, limiter, url, output_path, slide_id
+                )
+        
+        connector = aiohttp.TCPConnector(limit=self.concurrent_downloads)
+        timeout = aiohttp.ClientTimeout(total=3600)  # 1 hour timeout per file
+        
+        async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
+            tasks = [
+                bounded_download(session, slide_id, url, output_path)
+                for slide_id, url, output_path in downloads
+            ]
+            
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        downloaded = 0
+        failed = 0
+        failed_ids = []
+        
+        for result in results:
+            if isinstance(result, Exception):
+                failed += 1
+                failed_ids.append(str(result))
+            else:
+                slide_id, success, error = result
+                if success:
+                    downloaded += 1
+                else:
+                    failed += 1
+                    failed_ids.append(slide_id)
+        
+        return downloaded, failed, failed_ids
     
     def download_slides(
         self,
@@ -294,7 +406,7 @@ class IDRProvider(DatasetProvider):
         datasets: list[str] | None = None,
         **kwargs
     ) -> None:
-        """Download specific slides from BioImage Archive."""
+        """Download specific slides from BioImage Archive concurrently."""
         if cache_dir is None:
             cache_dir = output_dir.parent / "cache"
         cache_dir.mkdir(parents=True, exist_ok=True)
@@ -317,10 +429,9 @@ class IDRProvider(DatasetProvider):
             dataset_dir = output_dir / dataset_name
             dataset_dir.mkdir(parents=True, exist_ok=True)
             
-            # Download matching slides
-            downloaded = 0
+            # Build download list
+            downloads = []
             skipped = 0
-            failed = 0
             not_found = 0
             
             for slide_id in slide_ids:
@@ -337,11 +448,21 @@ class IDRProvider(DatasetProvider):
                     skipped += 1
                     continue
                 
-                logger.info(f"Downloading {slide_id} from BioImage Archive...")
-                if self._download_file(url, output_path):
-                    downloaded += 1
-                else:
-                    failed += 1
+                downloads.append((slide_id, url, output_path))
+            
+            if downloads:
+                logger.info(
+                    f"Starting concurrent download of {len(downloads)} files "
+                    f"({self.concurrent_downloads} concurrent, {self.rate_limit} req/s limit)"
+                )
+                
+                # Run async downloads
+                downloaded, failed, failed_ids = asyncio.run(
+                    self._download_files_async(downloads)
+                )
+            else:
+                downloaded = 0
+                failed = 0
             
             logger.info(
                 f"Download complete for {dataset_name}: "
@@ -359,7 +480,7 @@ class IDRProvider(DatasetProvider):
         cache_dir: Path | None = None,
         **kwargs
     ) -> None:
-        """Download complete IDR dataset(s) from BioImage Archive."""
+        """Download complete IDR dataset(s) from BioImage Archive concurrently."""
         if cache_dir is None:
             cache_dir = output_dir.parent / "cache"
         cache_dir.mkdir(parents=True, exist_ok=True)
@@ -382,9 +503,9 @@ class IDRProvider(DatasetProvider):
             dataset_dir = output_dir / dataset_name
             dataset_dir.mkdir(parents=True, exist_ok=True)
             
-            downloaded = 0
+            # Build download list
+            downloads = []
             skipped = 0
-            failed = 0
             
             for slide_id, file_info in available_slides.items():
                 filename = file_info["filename"]
@@ -395,11 +516,21 @@ class IDRProvider(DatasetProvider):
                     skipped += 1
                     continue
                 
-                logger.info(f"Downloading {slide_id}...")
-                if self._download_file(url, output_path):
-                    downloaded += 1
-                else:
-                    failed += 1
+                downloads.append((slide_id, url, output_path))
+            
+            if downloads:
+                logger.info(
+                    f"Starting concurrent download of {len(downloads)} files "
+                    f"({self.concurrent_downloads} concurrent, {self.rate_limit} req/s limit)"
+                )
+                
+                # Run async downloads
+                downloaded, failed, failed_ids = asyncio.run(
+                    self._download_files_async(downloads)
+                )
+            else:
+                downloaded = 0
+                failed = 0
             
             logger.info(
                 f"Download complete for {dataset_name}: "
