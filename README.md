@@ -32,6 +32,8 @@ patho-bench-dl list
 patho-bench-dl list cptac
 patho-bench-dl list panda
 patho-bench-dl list ovarian_bevacizumab
+patho-bench-dl list post_nat_brca
+patho-bench-dl list idr
 ```
 
 ### Download slides
@@ -54,6 +56,12 @@ patho-bench-dl download panda --download
 
 # Download Ovarian Bevacizumab Response slides
 patho-bench-dl download ovarian_bevacizumab --download
+
+# Download POST-NAT-BRCA slides
+patho-bench-dl download post_nat_brca --download
+
+# Download IDR slides (via BioImage Archive)
+patho-bench-dl download idr --download
 ```
 
 ### Full dataset download
@@ -64,6 +72,7 @@ Download entire datasets (not just Patho-Bench slides):
 patho-bench-dl download cptac --full --datasets cptac_ccrcc
 patho-bench-dl download panda --full
 patho-bench-dl download ovarian_bevacizumab --full
+patho-bench-dl download post_nat_brca --full
 ```
 
 ## Data Sources
@@ -74,6 +83,15 @@ patho-bench-dl download ovarian_bevacizumab --full
 | `panda` | [Kaggle Competition](https://www.kaggle.com/c/prostate-cancer-grade-assessment) | `~/.kaggle/kaggle.json` |
 | `imp` | [INESCTEC Open Datasets](https://open-datasets.inesctec.pt/NQ3sxFMZ/IMP-CRS2024-Dataset/) | None |
 | `ovarian_bevacizumab` | [TCIA Ovarian Bevacizumab Response](https://www.cancerimagingarchive.net/collection/ovarian-bevacizumab-response/) | None |
+| `post_nat_brca` | [TCIA POST-NAT-BRCA](https://www.cancerimagingarchive.net/collection/post-nat-brca/) | None |
+| `idr` | [Image Data Resource (OpenMicroscopy)](https://idr.openmicroscopy.org/) via [BioImage Archive](https://www.ebi.ac.uk/bioimage-archive/) | None |
+
+### IDR Datasets
+
+IDR slides are downloaded from the EBI BioImage Archive via direct HTTP. No additional dependencies required.
+
+Available IDR datasets:
+- `ucla_lung` - Lung carcinoma in-situ lesions from [idr0082](https://idr.openmicroscopy.org/webclient/?show=project-1251) ([S-BIAD509](https://www.ebi.ac.uk/biostudies/bioimages/studies/S-BIAD509))
 
 ## Development
 

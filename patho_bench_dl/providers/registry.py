@@ -42,11 +42,15 @@ def _auto_register():
     from patho_bench_dl.providers.panda import PANDAProvider
     from patho_bench_dl.providers.imp import IMPProvider
     from patho_bench_dl.providers.ovarian_bevacizumab import OvarianBevacizumabProvider
+    from patho_bench_dl.providers.post_nat_brca import PostNatBrcaProvider
+    from patho_bench_dl.providers.idr import IDRProvider
     
     register_provider(CPTACProvider())
     register_provider(PANDAProvider())
     register_provider(IMPProvider())
     register_provider(OvarianBevacizumabProvider())
+    register_provider(PostNatBrcaProvider())
+    register_provider(IDRProvider())
 
 
 _auto_register()
