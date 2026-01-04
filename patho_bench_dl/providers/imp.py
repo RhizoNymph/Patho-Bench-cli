@@ -1,15 +1,18 @@
-"""IMP dataset provider for direct HTTP download."""
+"""IMP dataset provider for direct HTTP download with concurrent downloads."""
 
+import asyncio
 import logging
 import ssl
 from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin
 
+import aiofiles
+import aiohttp
 import pandas as pd
+from aiolimiter import AsyncLimiter
 
 from patho_bench_dl.providers.base import DatasetProvider
-from patho_bench_dl.utils import download_file_urllib_with_retry, DEFAULT_MAX_RETRIES
 
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
@@ -28,9 +31,29 @@ SLIDE_FOLDERS = ["CRS1/slides", "CRS2/slides", "CRS_Test/slides"]
 # Slide file extension (SVS format on the server)
 SLIDE_EXTENSION = ".svs"
 
+# Download settings
+DEFAULT_CONCURRENT_DOWNLOADS = 4
+DEFAULT_RATE_LIMIT = 5  # requests per second
+DEFAULT_CHUNK_SIZE = 1024 * 1024  # 1MB chunks
+
 
 class IMPProvider(DatasetProvider):
-    """Provider for IMP-CRS2024 dataset via direct HTTP download."""
+    """Provider for IMP-CRS2024 dataset via direct HTTP download with concurrency."""
+    
+    def __init__(
+        self,
+        concurrent_downloads: int = DEFAULT_CONCURRENT_DOWNLOADS,
+        rate_limit: int = DEFAULT_RATE_LIMIT,
+    ):
+        """
+        Initialize the IMP provider.
+        
+        Args:
+            concurrent_downloads: Maximum number of concurrent downloads.
+            rate_limit: Maximum requests per second.
+        """
+        self.concurrent_downloads = concurrent_downloads
+        self.rate_limit = rate_limit
     
     @property
     def name(self) -> str:
@@ -98,35 +121,164 @@ class IMPProvider(DatasetProvider):
         
         return result
     
-    def _download_file(
-        self,
-        url: str,
-        target_path: Path,
-        max_retries: int = DEFAULT_MAX_RETRIES,
-    ) -> bool:
+    def _get_slide_urls(self, slide_id: str) -> list[str]:
         """
-        Download a single file from URL with retry on timeout.
+        Get all possible URLs for a slide (one per folder).
         
-        Bypasses SSL verification for expired certificates.
-        """
-        logger.info(f"Downloading {url}")
-        return download_file_urllib_with_retry(
-            url,
-            target_path,
-            max_retries=max_retries,
-            ssl_context=_SSL_CONTEXT,
-        )
-    
-    def _find_slide_in_folders(self, slide_id: str) -> str | None:
-        """
-        Determine which folder a slide might be in.
-        
-        Slides are named like CRC_XXXX.ndpi and could be in any of the folders.
-        We'll try each folder in sequence.
+        Slides are named like CRC_XXXX.svs and could be in any of the folders.
         """
         filename = f"{slide_id}{SLIDE_EXTENSION}"
-        for folder in SLIDE_FOLDERS:
-            yield urljoin(BASE_URL, f"{folder}/{filename}")
+        return [urljoin(BASE_URL, f"{folder}/{filename}") for folder in SLIDE_FOLDERS]
+    
+    async def _check_url_exists(
+        self,
+        session: aiohttp.ClientSession,
+        url: str,
+    ) -> bool:
+        """Check if a URL exists (HEAD request)."""
+        try:
+            async with session.head(url) as response:
+                return response.status == 200
+        except Exception:
+            return False
+    
+    async def _download_file_async(
+        self,
+        session: aiohttp.ClientSession,
+        limiter: AsyncLimiter,
+        url: str,
+        output_path: Path,
+        slide_id: str,
+    ) -> tuple[str, bool, str | None]:
+        """
+        Download a single file asynchronously.
+        
+        Args:
+            session: aiohttp session
+            limiter: Rate limiter
+            url: URL to download from
+            output_path: Path to save the file
+            slide_id: Slide identifier for logging
+            
+        Returns:
+            Tuple of (slide_id, success, error_message)
+        """
+        temp_path = output_path.with_suffix(output_path.suffix + '.tmp')
+        
+        try:
+            async with limiter:
+                async with session.get(url) as response:
+                    if response.status == 404:
+                        return (slide_id, False, "not_found")
+                    
+                    if response.status != 200:
+                        error_msg = f"HTTP {response.status}"
+                        logger.error(f"  Failed {slide_id}: {error_msg}")
+                        return (slide_id, False, error_msg)
+                    
+                    # Stream to temp file
+                    async with aiofiles.open(temp_path, 'wb') as f:
+                        async for chunk in response.content.iter_chunked(DEFAULT_CHUNK_SIZE):
+                            await f.write(chunk)
+                    
+                    # Move temp to final
+                    temp_path.rename(output_path)
+                    logger.info(f"  Downloaded {slide_id}")
+                    return (slide_id, True, None)
+                    
+        except asyncio.CancelledError:
+            if temp_path.exists():
+                temp_path.unlink()
+            raise
+        except Exception as e:
+            if temp_path.exists():
+                temp_path.unlink()
+            error_msg = str(e)
+            return (slide_id, False, error_msg)
+    
+    async def _try_download_from_folders(
+        self,
+        session: aiohttp.ClientSession,
+        limiter: AsyncLimiter,
+        slide_id: str,
+        output_path: Path,
+    ) -> tuple[str, bool, str | None]:
+        """
+        Try to download a slide from any of the possible folders.
+        
+        Returns:
+            Tuple of (slide_id, success, error_message)
+        """
+        urls = self._get_slide_urls(slide_id)
+        
+        for url in urls:
+            slide_id_result, success, error = await self._download_file_async(
+                session, limiter, url, output_path, slide_id
+            )
+            if success:
+                return (slide_id, True, None)
+            # Only continue trying if the error was "not found"
+            if error != "not_found":
+                return (slide_id, False, error)
+        
+        return (slide_id, False, "Slide not found in any folder")
+    
+    async def _download_slides_async(
+        self,
+        downloads: list[tuple[str, Path]],  # (slide_id, output_path)
+    ) -> tuple[int, int, list[str]]:
+        """
+        Download multiple slides concurrently.
+        
+        Args:
+            downloads: List of (slide_id, output_path) tuples
+            
+        Returns:
+            Tuple of (downloaded_count, failed_count, failed_ids)
+        """
+        limiter = AsyncLimiter(self.rate_limit, 1.0)
+        semaphore = asyncio.Semaphore(self.concurrent_downloads)
+        
+        async def bounded_download(session, slide_id, output_path):
+            async with semaphore:
+                return await self._try_download_from_folders(
+                    session, limiter, slide_id, output_path
+                )
+        
+        # Create SSL context for aiohttp that skips verification
+        ssl_context = ssl.create_default_context()
+        ssl_context.check_hostname = False
+        ssl_context.verify_mode = ssl.CERT_NONE
+        
+        connector = aiohttp.TCPConnector(limit=self.concurrent_downloads, ssl=ssl_context)
+        timeout = aiohttp.ClientTimeout(total=3600)  # 1 hour timeout per file
+        
+        async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
+            tasks = [
+                bounded_download(session, slide_id, output_path)
+                for slide_id, output_path in downloads
+            ]
+            
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        downloaded = 0
+        failed = 0
+        failed_ids = []
+        
+        for result in results:
+            if isinstance(result, Exception):
+                failed += 1
+                logger.error(f"Download task failed with exception: {result}")
+            else:
+                slide_id, success, error = result
+                if success:
+                    downloaded += 1
+                else:
+                    failed += 1
+                    failed_ids.append(slide_id)
+                    logger.warning(f"Could not download slide {slide_id}: {error}")
+        
+        return downloaded, failed, failed_ids
     
     def download_slides(
         self,
@@ -137,12 +289,12 @@ class IMPProvider(DatasetProvider):
         tasks_dir: Path | None = None,
         **kwargs
     ) -> None:
-        """Download specific IMP slides."""
+        """Download specific IMP slides concurrently."""
         output_dir.mkdir(parents=True, exist_ok=True)
         
-        downloaded = 0
+        # Build list of downloads needed
+        downloads = []
         skipped = 0
-        failed = 0
         
         for slide_id in sorted(slide_ids):
             filename = f"{slide_id}{SLIDE_EXTENSION}"
@@ -152,19 +304,17 @@ class IMPProvider(DatasetProvider):
                 skipped += 1
                 continue
             
-            # Try each folder until we find the slide
-            success = False
-            for url in self._find_slide_in_folders(slide_id):
-                if self._download_file(url, target_path):
-                    success = True
-                    downloaded += 1
-                    break
-            
-            if not success:
-                failed += 1
-                logger.warning(f"Could not find slide: {slide_id}")
+            downloads.append((slide_id, target_path))
         
-        logger.info(f"Download complete. Downloaded: {downloaded}, Skipped: {skipped}, Failed: {failed}")
+        if skipped > 0:
+            logger.info(f"Skipping {skipped} already downloaded slides")
+        
+        if downloads:
+            logger.info(f"Downloading {len(downloads)} slides with {self.concurrent_downloads} concurrent connections...")
+            downloaded, failed, failed_ids = asyncio.run(self._download_slides_async(downloads))
+            logger.info(f"Download complete. Downloaded: {downloaded}, Skipped: {skipped}, Failed: {failed}")
+        else:
+            logger.info("All slides already downloaded")
         
         # Create symlinks
         if create_symlinks and tasks_dir:
