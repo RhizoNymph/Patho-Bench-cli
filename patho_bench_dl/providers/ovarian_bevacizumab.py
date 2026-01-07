@@ -18,7 +18,7 @@ OVARIAN_BEV_COLLECTION = "Ovarian Bevacizumab Response"
 
 # Mapping from Patho-Bench dataset names to TCIA collection names
 OVARIAN_BEV_COLLECTION_MAP = {
-    "ovarian_bevacizumab_response": OVARIAN_BEV_COLLECTION,
+    "ovarian": OVARIAN_BEV_COLLECTION,
 }
 
 
