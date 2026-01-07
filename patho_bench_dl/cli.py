@@ -97,6 +97,8 @@ def cmd_download(args):
         provider.download_full(
             output_dir=output_dir,
             datasets=args.datasets,
+            create_symlinks=args.create_symlinks,
+            tasks_dir=tasks_dir,
         )
     else:
         # Get slide IDs from task files

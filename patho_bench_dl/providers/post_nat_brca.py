@@ -245,6 +245,9 @@ class PostNatBrcaProvider(DatasetProvider):
         self,
         output_dir: Path,
         datasets: list[str] | None = None,
+        *,
+        create_symlinks: bool = False,
+        tasks_dir: Path | None = None,
         cache_dir: Path | None = None,
         **kwargs
     ) -> None:
@@ -271,6 +274,10 @@ class PostNatBrcaProvider(DatasetProvider):
         
         # Retry any failed downloads
         self._retry_failed_downloads(expected_files, collection_dir)
+        
+        # Create symlinks if requested
+        if create_symlinks and tasks_dir:
+            self._create_symlinks(tasks_dir, output_dir, datasets)
     
     def _create_symlinks(
         self,

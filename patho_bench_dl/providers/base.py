@@ -89,6 +89,9 @@ class DatasetProvider(ABC):
         self,
         output_dir: Path,
         datasets: list[str] | None = None,
+        *,
+        create_symlinks: bool = False,
+        tasks_dir: Path | None = None,
         **kwargs
     ) -> None:
         """
@@ -97,6 +100,8 @@ class DatasetProvider(ABC):
         Args:
             output_dir: Directory to save slides to.
             datasets: Optional list of specific datasets to download.
+            create_symlinks: If True, create per-task symlink directories.
+            tasks_dir: Path to tasks directory (needed for symlinks).
             **kwargs: Provider-specific options.
         """
         ...

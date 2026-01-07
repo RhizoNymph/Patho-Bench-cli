@@ -220,6 +220,9 @@ class PANDAProvider(DatasetProvider):
         self,
         output_dir: Path,
         datasets: list[str] | None = None,
+        *,
+        create_symlinks: bool = False,
+        tasks_dir: Path | None = None,
         cleanup_zip: bool = True,
         **kwargs
     ) -> None:
@@ -236,6 +239,10 @@ class PANDAProvider(DatasetProvider):
         if cleanup_zip and zip_path.exists():
             logger.info(f"Removing zip file: {zip_path}")
             zip_path.unlink()
+        
+        # Create symlinks if requested
+        if create_symlinks and tasks_dir:
+            self._create_symlinks(tasks_dir, output_dir)
     
     def _create_symlinks(self, tasks_dir: Path, slides_dir: Path) -> None:
         """Create per-task symlink directories."""

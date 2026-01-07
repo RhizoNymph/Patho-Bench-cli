@@ -324,6 +324,9 @@ class IMPProvider(DatasetProvider):
         self,
         output_dir: Path,
         datasets: list[str] | None = None,
+        *,
+        create_symlinks: bool = False,
+        tasks_dir: Path | None = None,
         **kwargs
     ) -> None:
         """Download complete IMP dataset."""
@@ -343,9 +346,9 @@ class IMPProvider(DatasetProvider):
         )
         
         # Try to use tasks dir if available in the same parent
-        tasks_dir = output_dir.parent / "tasks"
-        if tasks_dir.exists():
-            slide_ids_by_task = self.get_slide_ids_for_tasks(tasks_dir)
+        effective_tasks_dir = tasks_dir or (output_dir.parent / "tasks")
+        if effective_tasks_dir.exists():
+            slide_ids_by_task = self.get_slide_ids_for_tasks(effective_tasks_dir)
             all_slides = set()
             for ids in slide_ids_by_task.values():
                 all_slides.update(ids)
@@ -353,6 +356,10 @@ class IMPProvider(DatasetProvider):
             if all_slides:
                 logger.info(f"Found {len(all_slides)} slides from task files")
                 self.download_slides(all_slides, output_dir)
+                
+                # Create symlinks if requested
+                if create_symlinks and effective_tasks_dir.exists():
+                    self._create_symlinks(effective_tasks_dir, output_dir)
                 return
         
         logger.error(
