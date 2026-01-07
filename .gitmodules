@@ -1,0 +1,3 @@
+[submodule "TRIDENT"]
+	path = TRIDENT
+	url = https://github.com/RhizoNymph/TRIDENT
