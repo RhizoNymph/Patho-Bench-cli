@@ -41,6 +41,55 @@ def suppress_stderr():
             os.close(old_stderr_fd)
 
 
+def get_mpp(slide):
+    """Extract MPP from OpenSlide object properties."""
+    mpp_keys = [
+        openslide.PROPERTY_NAME_MPP_X,
+        'openslide.mirax.MPP',
+        'aperio.MPP',
+        'hamamatsu.XResolution',
+        'openslide.comment',
+    ]
+    
+    for key in mpp_keys:
+        if key in slide.properties:
+            try:
+                # Some properties might contain multiple values or non-float strings
+                val = slide.properties[key]
+                if key == 'hamamatsu.XResolution':
+                    # Hamamatsu resolution is often in nm/pixel, needs conversion to um/pixel
+                    # TRIDENT seems to just cast it, let's follow that but be careful
+                    mpp_x = float(val) / 1000.0 if float(val) > 100 else float(val)
+                else:
+                    mpp_x = float(val)
+                return round(mpp_x, 4)
+            except (ValueError, TypeError):
+                continue
+
+    x_res = slide.properties.get('tiff.XResolution')
+    unit = slide.properties.get('tiff.ResolutionUnit')
+    if x_res and unit:
+        try:
+            if unit.lower() == 'centimeter':
+                return round(10000 / float(x_res), 4)
+            elif unit.lower() == 'inch':
+                return round(25400 / float(x_res), 4)
+        except (ValueError, TypeError):
+            pass
+    return None
+
+
+def get_mag(slide):
+    """Extract magnification from OpenSlide object properties."""
+    mag = slide.properties.get(openslide.PROPERTY_NAME_OBJECTIVE_POWER)
+    if mag is not None:
+        try:
+            return int(float(mag))
+        except (ValueError, TypeError):
+            pass
+    return None
+
+
 def cmd_list(args):
     """Handle the 'list' subcommand."""
     if args.provider:
@@ -292,8 +341,22 @@ def verify_slides_in_parallel(wsi_paths, jobs, delete=False, verbose=False):
         try:
             # Try to open the slide
             slide = openslide.OpenSlide(str(path))
-            # Accessing dimensions often triggers format validation
+            
+            # 1. Accessing dimensions often triggers format validation
             _ = slide.dimensions
+            
+            # 2. Check for MPP (required for TRIDENT and most analysis)
+            mpp = get_mpp(slide)
+            if mpp is None:
+                raise ValueError("Missing MPP (microns per pixel) metadata")
+                
+            # 3. Check for Magnification
+            mag = get_mag(slide)
+            if mag is None:
+                # Optional: Some workflows might proceed without mag, 
+                # but TRIDENT's OpenSlideWSI raises for it.
+                raise ValueError("Missing magnification metadata")
+
             slide.close()
             is_valid = True
         except Exception as e:
