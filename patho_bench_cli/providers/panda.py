@@ -11,8 +11,8 @@ from typing import Any
 import pandas as pd
 from tenacity import retry, stop_after_attempt, wait_exponential, before_sleep_log
 
-from patho_bench_dl.providers.base import DatasetProvider
-from patho_bench_dl.utils import DEFAULT_MAX_RETRIES
+from patho_bench_cli.providers.base import DatasetProvider
+from patho_bench_cli.utils import DEFAULT_MAX_RETRIES
 
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)

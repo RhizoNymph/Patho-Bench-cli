@@ -9,11 +9,14 @@ Usage:
 
 import argparse
 import sys
+import os
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
 
 import datasets
+import openslide
 
-from patho_bench_dl.providers import get_provider, list_providers
+from patho_bench_cli.providers import get_provider, list_providers
 
 
 def cmd_list(args):
@@ -159,6 +162,82 @@ def cmd_tasks(args):
     return 0
 
 
+def cmd_verify(args):
+    """Handle the 'verify' subcommand."""
+    target_dir = Path(args.target_dir)
+    if not target_dir.exists():
+        print(f"Error: Target directory not found: {target_dir}", file=sys.stderr)
+        return 1
+
+    # Common WSI extensions
+    extensions = {'.svs', '.tif', '.tiff', '.ndpi', '.mrxs', '.scn', '.bif', '.vms', '.vmu'}
+    
+    print(f"Searching for WSI files in {target_dir}...")
+    wsi_paths = []
+    # Find all files with matching extensions (case-insensitive-ish via list check)
+    for p in target_dir.rglob("*"):
+        if p.suffix.lower() in extensions:
+            wsi_paths.append(p)
+    
+    if not wsi_paths:
+        print("No WSI files found.")
+        return 0
+
+    print(f"Found {len(wsi_paths)} files. Verifying using {args.jobs} jobs...")
+
+    def verify_single(path):
+        try:
+            # Try to open the slide
+            slide = openslide.OpenSlide(str(path))
+            # Accessing dimensions often triggers format validation
+            _ = slide.dimensions
+            slide.close()
+            return path, True, None
+        except Exception as e:
+            return path, False, str(e)
+
+    try:
+        from tqdm import tqdm
+        pbar = tqdm(total=len(wsi_paths), desc="Verifying")
+    except ImportError:
+        pbar = None
+
+    passed = []
+    failed = []
+
+    with ThreadPoolExecutor(max_workers=args.jobs) as executor:
+        futures = [executor.submit(verify_single, p) for p in wsi_paths]
+        for future in futures:
+            path, is_valid, error = future.result()
+            if is_valid:
+                passed.append(path)
+            else:
+                failed.append((path, error))
+            if pbar:
+                pbar.update(1)
+
+    if pbar:
+        pbar.close()
+
+    print(f"\nVerification Results:")
+    print(f"  Total:  {len(wsi_paths)}")
+    print(f"  Passed: {len(passed)}")
+    print(f"  Failed: {len(failed)}")
+
+    if failed:
+        print("\nFailed Slides:")
+        for path, error in failed:
+            print(f"  {path}: {error}")
+            if args.delete:
+                try:
+                    path.unlink()
+                    print(f"    -> Deleted.")
+                except Exception as de:
+                    print(f"    -> Error deleting: {de}")
+
+    return 1 if failed else 0
+
+
 def main():
     """Main CLI entry point."""
     parser = argparse.ArgumentParser(
@@ -236,6 +315,27 @@ def main():
         help="Specific dataset to download (default: all)"
     )
     
+    # --- verify subcommand ---
+    verify_parser = subparsers.add_parser(
+        "verify",
+        help="Verify WSI files in a directory"
+    )
+    verify_parser.add_argument(
+        "target_dir",
+        help="Directory to search for WSI files"
+    )
+    verify_parser.add_argument(
+        "-d", "--delete",
+        action="store_true",
+        help="Delete slides that fail to open"
+    )
+    verify_parser.add_argument(
+        "-j", "--jobs",
+        type=int,
+        default=os.cpu_count() or 1,
+        help=f"Number of parallel jobs (default: {os.cpu_count() or 1})"
+    )
+    
     args = parser.parse_args()
     
     if args.command is None:
@@ -249,6 +349,8 @@ def main():
         return cmd_download(args)
     elif args.command == "tasks":
         return cmd_tasks(args)
+    elif args.command == "verify":
+        return cmd_verify(args)
     else:
         parser.print_help()
         return 1

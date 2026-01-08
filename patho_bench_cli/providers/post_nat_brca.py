@@ -7,8 +7,8 @@ from typing import Any
 import pandas as pd
 from tcia_utils import pathdb
 
-from patho_bench_dl.providers.base import DatasetProvider
-from patho_bench_dl.utils import download_file_with_retry, DEFAULT_MAX_RETRIES
+from patho_bench_cli.providers.base import DatasetProvider
+from patho_bench_cli.utils import download_file_with_retry, DEFAULT_MAX_RETRIES
 
 logging.basicConfig()
 logger = logging.getLogger(__name__)

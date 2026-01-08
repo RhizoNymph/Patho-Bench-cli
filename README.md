@@ -105,10 +105,10 @@ pytest
 
 ## Adding New Providers
 
-Create a new provider by implementing `DatasetProvider` in `patho_bench_dl/providers/`:
+Create a new provider by implementing `DatasetProvider` in `patho_bench_cli/providers/`:
 
 ```python
-from patho_bench_dl.providers.base import DatasetProvider
+from patho_bench_cli.providers.base import DatasetProvider
 
 class MyProvider(DatasetProvider):
     @property
@@ -118,4 +118,4 @@ class MyProvider(DatasetProvider):
     # ... implement other methods
 ```
 
-Then register it in `patho_bench_dl/providers/registry.py`.
+Then register it in `patho_bench_cli/providers/registry.py`.

@@ -1,4 +1,4 @@
-"""Ovarian Bevacizumab Response dataset provider using TCIA PathDB API."""
+"""CPTAC dataset provider using TCIA PathDB API."""
 
 import logging
 from pathlib import Path
@@ -7,35 +7,44 @@ from typing import Any
 import pandas as pd
 from tcia_utils import pathdb
 
-from patho_bench_dl.providers.base import DatasetProvider
-from patho_bench_dl.utils import download_file_with_retry, DEFAULT_MAX_RETRIES
+from patho_bench_cli.providers.base import DatasetProvider
+from patho_bench_cli.utils import download_file_with_retry, DEFAULT_MAX_RETRIES
 
 logging.basicConfig()
 logger = logging.getLogger(__name__)
 
-# TCIA collection name for Ovarian Bevacizumab Response
-OVARIAN_BEV_COLLECTION = "Ovarian Bevacizumab Response"
-
 # Mapping from Patho-Bench dataset names to TCIA collection names
-OVARIAN_BEV_COLLECTION_MAP = {
-    "ovarian": OVARIAN_BEV_COLLECTION,
+CPTAC_COLLECTION_MAP = {
+    "cptac_ccrcc": "CPTAC-CCRCC",
+    "cptac_ccrcc_dhmc": "CPTAC-CCRCC",  # Same collection, different task subset
+    "cptac_brca": "CPTAC-BRCA",
+    "cptac_coad": "CPTAC-COAD",
+    "cptac_gbm": "CPTAC-GBM",
+    "cptac_hnsc": "CPTAC-HNSCC",
+    "cptac_lscc": "CPTAC-LSCC",
+    "cptac_luad": "CPTAC-LUAD",
+    "cptac_lung": None,  # Combined dataset - need both LUAD and LSCC
+    "cptac_ov": "CPTAC-OV",
+    "cptac_pda": "CPTAC-PDA",
+    "cptac_ucec": "CPTAC-UCEC",
+    "cptac_all": None,  # Meta-dataset
 }
 
 
-class OvarianBevacizumabProvider(DatasetProvider):
-    """Provider for Ovarian Bevacizumab Response dataset from TCIA."""
+class CPTACProvider(DatasetProvider):
+    """Provider for CPTAC datasets from TCIA."""
     
     @property
     def name(self) -> str:
-        return "ovarian_bevacizumab"
+        return "cptac"
     
     @property
     def description(self) -> str:
-        return "Ovarian Bevacizumab Response dataset from The Cancer Imaging Archive (TCIA)"
+        return "CPTAC datasets from The Cancer Imaging Archive (TCIA)"
     
     @property
     def datasets(self) -> list[str]:
-        return list(OVARIAN_BEV_COLLECTION_MAP.keys())
+        return list(CPTAC_COLLECTION_MAP.keys())
     
     def _get_all_tsv_files(self, tasks_dir: Path) -> list[Path]:
         """Find all k=all.tsv files in the tasks directory."""
@@ -49,23 +58,23 @@ class OvarianBevacizumabProvider(DatasetProvider):
         return pd.DataFrame(columns=["case_id", "slide_id"])
     
     def list_tasks(self, tasks_dir: Path) -> list[dict[str, Any]]:
-        """List all available Ovarian Bevacizumab Response tasks."""
+        """List all available CPTAC tasks."""
         tasks = []
         for tsv_path in self._get_all_tsv_files(tasks_dir):
             dataset_name = tsv_path.parent.parent.name
-            if dataset_name not in OVARIAN_BEV_COLLECTION_MAP:
+            if not dataset_name.startswith("cptac"):
                 continue
             
             task_name = tsv_path.parent.name
             df = self._extract_slide_ids_from_tsv(tsv_path)
-            tcia_collection = OVARIAN_BEV_COLLECTION_MAP.get(dataset_name)
+            tcia_collection = CPTAC_COLLECTION_MAP.get(dataset_name)
             
             tasks.append({
                 "dataset": dataset_name,
                 "task": task_name,
                 "n_slides": len(df),
                 "n_cases": df["case_id"].nunique() if "case_id" in df.columns else 0,
-                "tcia_collection": tcia_collection,
+                "tcia_collection": tcia_collection or "(combined)",
             })
         return tasks
     
@@ -74,14 +83,14 @@ class OvarianBevacizumabProvider(DatasetProvider):
         tasks_dir: Path,
         datasets: list[str] | None = None
     ) -> dict[str, set[str]]:
-        """Get slide IDs needed for Ovarian Bevacizumab Response Patho-Bench tasks."""
+        """Get slide IDs needed for CPTAC Patho-Bench tasks."""
         result: dict[str, set[str]] = {}
         
         for tsv_path in self._get_all_tsv_files(tasks_dir):
             dataset_name = tsv_path.parent.parent.name
             
-            # Only process Ovarian Bevacizumab datasets
-            if dataset_name not in OVARIAN_BEV_COLLECTION_MAP:
+            # Only process CPTAC datasets
+            if not dataset_name.startswith("cptac"):
                 continue
             
             # Filter to requested datasets
@@ -122,22 +131,13 @@ class OvarianBevacizumabProvider(DatasetProvider):
     
     def _match_slides_to_tcia(
         self,
-        needed_slide_ids: set[str],
+        needed_case_ids: set[str],
         tcia_images: pd.DataFrame
     ) -> pd.DataFrame:
-        """Match needed slides to TCIA images by filename."""
+        """Match needed cases to TCIA images."""
         if tcia_images.empty:
             return pd.DataFrame()
-        
-        # Match by extracting filename stem from imageUrl
-        if "imageUrl" in tcia_images.columns:
-            tcia_images = tcia_images.copy()
-            tcia_images["filename_stem"] = tcia_images["imageUrl"].apply(
-                lambda x: Path(x.split("/")[-1]).stem if pd.notna(x) else ""
-            )
-            return tcia_images[tcia_images["filename_stem"].isin(needed_slide_ids)]
-        
-        return pd.DataFrame()
+        return tcia_images[tcia_images["subjectId"].isin(needed_case_ids)].copy()
     
     def _get_expected_files(self, images_df: pd.DataFrame) -> dict[str, str]:
         """
@@ -208,34 +208,57 @@ class OvarianBevacizumabProvider(DatasetProvider):
         datasets: list[str] | None = None,
         **kwargs
     ) -> None:
-        """Download specific Ovarian Bevacizumab Response slides from TCIA."""
+        """Download specific CPTAC slides from TCIA."""
         if cache_dir is None:
             cache_dir = output_dir.parent / "cache"
         cache_dir.mkdir(parents=True, exist_ok=True)
         output_dir.mkdir(parents=True, exist_ok=True)
         
-        collection = OVARIAN_BEV_COLLECTION
-        collection_dir = output_dir / collection
-        collection_dir.mkdir(parents=True, exist_ok=True)
+        # Extract case_ids from slide_ids (format: {case_id}-{suffix})
+        case_ids = set()
+        for sid in slide_ids:
+            parts = sid.rsplit("-", 1)
+            if len(parts) == 2:
+                case_ids.add(parts[0])
+            else:
+                case_ids.add(sid)
         
-        tcia_images = self._query_tcia_images(collection, cache_dir)
-        if tcia_images.empty:
-            logger.warning(f"No images found for {collection}")
-            return
+        # Determine which collections to query
+        collections_needed: set[str] = set()
+        if datasets:
+            for ds in datasets:
+                collection = CPTAC_COLLECTION_MAP.get(ds)
+                if collection:
+                    collections_needed.add(collection)
+        else:
+            # Query all known collections
+            for collection in CPTAC_COLLECTION_MAP.values():
+                if collection:
+                    collections_needed.add(collection)
         
-        matched = self._match_slides_to_tcia(slide_ids, tcia_images)
-        if matched.empty:
-            logger.warning(f"No matching slides found in {collection}")
-            return
+        logger.info(f"Querying TCIA collections: {collections_needed}")
         
-        # Get expected files before download for retry tracking
-        expected_files = self._get_expected_files(matched)
-        
-        logger.info(f"Downloading {len(matched)} images to {collection_dir}")
-        pathdb.downloadImages(matched, path=str(collection_dir))
-        
-        # Retry any failed downloads
-        self._retry_failed_downloads(expected_files, collection_dir)
+        # Query and download from each collection
+        for collection in sorted(collections_needed):
+            tcia_images = self._query_tcia_images(collection, cache_dir)
+            if tcia_images.empty:
+                continue
+            
+            matched = self._match_slides_to_tcia(case_ids, tcia_images)
+            if matched.empty:
+                continue
+            
+            collection_dir = output_dir / collection
+            collection_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Get expected files before download for retry tracking
+            expected_files = self._get_expected_files(matched)
+            
+            logger.info(f"Downloading {len(matched)} images to {collection_dir}")
+            pathdb.downloadImages(matched, path=str(collection_dir))
+            
+            # Retry any failed downloads
+            self._retry_failed_downloads(expected_files, collection_dir)
         
         # Create symlinks if requested
         if create_symlinks and tasks_dir:
@@ -251,29 +274,43 @@ class OvarianBevacizumabProvider(DatasetProvider):
         cache_dir: Path | None = None,
         **kwargs
     ) -> None:
-        """Download complete Ovarian Bevacizumab Response collection from TCIA."""
+        """Download complete CPTAC collections from TCIA."""
         if cache_dir is None:
             cache_dir = output_dir.parent / "cache"
         cache_dir.mkdir(parents=True, exist_ok=True)
         output_dir.mkdir(parents=True, exist_ok=True)
         
-        collection = OVARIAN_BEV_COLLECTION
-        collection_dir = output_dir / collection
-        collection_dir.mkdir(parents=True, exist_ok=True)
+        # Determine which collections to download
+        collections_needed: set[str] = set()
+        if datasets:
+            for ds in datasets:
+                collection = CPTAC_COLLECTION_MAP.get(ds)
+                if collection:
+                    collections_needed.add(collection)
+        else:
+            for collection in CPTAC_COLLECTION_MAP.values():
+                if collection:
+                    collections_needed.add(collection)
         
-        tcia_images = self._query_tcia_images(collection, cache_dir)
-        if tcia_images.empty:
-            logger.warning(f"No images found for {collection}")
-            return
+        logger.info(f"Downloading full collections: {collections_needed}")
         
-        # Get expected files before download for retry tracking
-        expected_files = self._get_expected_files(tcia_images)
-        
-        logger.info(f"Downloading ALL {len(tcia_images)} images to {collection_dir}")
-        pathdb.downloadImages(tcia_images, path=str(collection_dir))
-        
-        # Retry any failed downloads
-        self._retry_failed_downloads(expected_files, collection_dir)
+        for collection in sorted(collections_needed):
+            tcia_images = self._query_tcia_images(collection, cache_dir)
+            if tcia_images.empty:
+                logger.warning(f"No images found for {collection}")
+                continue
+            
+            collection_dir = output_dir / collection
+            collection_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Get expected files before download for retry tracking
+            expected_files = self._get_expected_files(tcia_images)
+            
+            logger.info(f"Downloading ALL {len(tcia_images)} images to {collection_dir}")
+            pathdb.downloadImages(tcia_images, path=str(collection_dir))
+            
+            # Retry any failed downloads
+            self._retry_failed_downloads(expected_files, collection_dir)
         
         # Create symlinks if requested
         if create_symlinks and tasks_dir:
@@ -290,12 +327,12 @@ class OvarianBevacizumabProvider(DatasetProvider):
             dataset_name = tsv_path.parent.parent.name
             task_name = tsv_path.parent.name
             
-            if dataset_name not in OVARIAN_BEV_COLLECTION_MAP:
+            if not dataset_name.startswith("cptac"):
                 continue
             if datasets and dataset_name not in datasets:
                 continue
             
-            collection = OVARIAN_BEV_COLLECTION_MAP.get(dataset_name)
+            collection = CPTAC_COLLECTION_MAP.get(dataset_name)
             if not collection:
                 continue
             
@@ -307,14 +344,26 @@ class OvarianBevacizumabProvider(DatasetProvider):
             slide_df = self._extract_slide_ids_from_tsv(tsv_path)
             task_slide_ids = set(slide_df["slide_id"].unique())
             
+            # Extract case_ids from slide_ids for matching (format: {case_id}-{suffix})
+            task_case_ids = set()
+            for sid in task_slide_ids:
+                parts = sid.rsplit("-", 1)
+                if len(parts) == 2:
+                    task_case_ids.add(parts[0])
+                else:
+                    task_case_ids.add(sid)
+            
             task_dir = slides_dir / "by_task" / dataset_name / task_name
             task_dir.mkdir(parents=True, exist_ok=True)
             
             symlink_count = 0
             for img_file in collection_dir.glob("*"):
                 if img_file.is_file():
-                    # Check if this file's stem matches a task slide_id
-                    if img_file.stem in task_slide_ids:
+                    # Check if this file belongs to a case_id in this task
+                    filename_stem = img_file.stem
+                    # Try to match by case_id (file might be named like {case_id}.svs)
+                    file_case_id = filename_stem.split("-")[0] if "-" in filename_stem else filename_stem
+                    if file_case_id in task_case_ids or filename_stem in task_slide_ids:
                         symlink_path = task_dir / img_file.name
                         if not symlink_path.exists():
                             symlink_path.symlink_to(img_file.resolve())
@@ -322,4 +371,3 @@ class OvarianBevacizumabProvider(DatasetProvider):
             
             if symlink_count > 0:
                 logger.info(f"  {dataset_name}/{task_name}: {symlink_count} symlinks")
-

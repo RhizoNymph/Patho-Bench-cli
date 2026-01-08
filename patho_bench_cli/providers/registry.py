@@ -1,6 +1,6 @@
 """Provider registry for dataset sources."""
 
-from patho_bench_dl.providers.base import DatasetProvider
+from patho_bench_cli.providers.base import DatasetProvider
 
 # Registry of available providers
 _PROVIDERS: dict[str, DatasetProvider] = {}
@@ -38,12 +38,12 @@ def list_providers() -> dict[str, DatasetProvider]:
 # Auto-register providers on import
 def _auto_register():
     """Import and register all built-in providers."""
-    from patho_bench_dl.providers.cptac import CPTACProvider
-    from patho_bench_dl.providers.panda import PANDAProvider
-    from patho_bench_dl.providers.imp import IMPProvider
-    from patho_bench_dl.providers.ovarian_bevacizumab import OvarianBevacizumabProvider
-    from patho_bench_dl.providers.post_nat_brca import PostNatBrcaProvider
-    from patho_bench_dl.providers.idr import IDRProvider
+    from patho_bench_cli.providers.cptac import CPTACProvider
+    from patho_bench_cli.providers.panda import PANDAProvider
+    from patho_bench_cli.providers.imp import IMPProvider
+    from patho_bench_cli.providers.ovarian_bevacizumab import OvarianBevacizumabProvider
+    from patho_bench_cli.providers.post_nat_brca import PostNatBrcaProvider
+    from patho_bench_cli.providers.idr import IDRProvider
     
     register_provider(CPTACProvider())
     register_provider(PANDAProvider())

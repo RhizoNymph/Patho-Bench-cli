@@ -3,7 +3,7 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "patho-bench-dl"
+name = "patho-bench-cli"
 version = "0.2.0"
 description = "Unified downloader for Patho-Bench datasets"
 readme = "README.md"
@@ -16,6 +16,8 @@ dependencies = [
     "dotenv>=0.9.9",
     "huggingface-hub>=1.2.1",
     "kaggle>=1.8.2",
+    "openslide-bin>=4.0.0.11",
+    "openslide-python>=1.4.3",
     "pandas>=2.3.3",
     "requests>=2.28.0",
     "synapseclient>=4.10.0",
@@ -24,12 +26,12 @@ dependencies = [
 ]
 
 [project.scripts]
-patho-bench-dl = "patho_bench_dl.cli:main"
+patho-bench-cli = "patho_bench_cli.cli:main"
 
 [project.optional-dependencies]
 dev = ["pytest", "pytest-cov"]
 
 [tool.setuptools.packages.find]
-include = ["patho_bench_dl*"]
+include = ["patho_bench_cli*"]
 
 

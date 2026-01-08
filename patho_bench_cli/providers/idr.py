@@ -12,7 +12,7 @@ import pandas as pd
 import requests
 from aiolimiter import AsyncLimiter
 
-from patho_bench_dl.providers.base import DatasetProvider
+from patho_bench_cli.providers.base import DatasetProvider
 
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
