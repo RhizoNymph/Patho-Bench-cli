@@ -32,8 +32,8 @@ SLIDE_FOLDERS = ["CRS1/slides", "CRS2/slides", "CRS_Test/slides"]
 SLIDE_EXTENSION = ".svs"
 
 # Download settings
-DEFAULT_CONCURRENT_DOWNLOADS = 4
-DEFAULT_RATE_LIMIT = 5  # requests per second
+DEFAULT_CONCURRENT_DOWNLOADS = 50
+DEFAULT_RATE_LIMIT = 50  # requests per second
 DEFAULT_CHUNK_SIZE = 1024 * 1024  # 1MB chunks
 
 

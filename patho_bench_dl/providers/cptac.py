@@ -322,7 +322,7 @@ class CPTACProvider(DatasetProvider):
         slides_dir: Path,
         datasets: list[str] | None = None
     ) -> None:
-        """Create per-task symlink directories."""
+        """Create per-task symlink directories with only task-specific slides."""
         for tsv_path in self._get_all_tsv_files(tasks_dir):
             dataset_name = tsv_path.parent.parent.name
             task_name = tsv_path.parent.name
@@ -340,16 +340,34 @@ class CPTACProvider(DatasetProvider):
             if not collection_dir.exists():
                 continue
             
+            # Get slide IDs needed for this specific task
+            slide_df = self._extract_slide_ids_from_tsv(tsv_path)
+            task_slide_ids = set(slide_df["slide_id"].unique())
+            
+            # Extract case_ids from slide_ids for matching (format: {case_id}-{suffix})
+            task_case_ids = set()
+            for sid in task_slide_ids:
+                parts = sid.rsplit("-", 1)
+                if len(parts) == 2:
+                    task_case_ids.add(parts[0])
+                else:
+                    task_case_ids.add(sid)
+            
             task_dir = slides_dir / "by_task" / dataset_name / task_name
             task_dir.mkdir(parents=True, exist_ok=True)
             
             symlink_count = 0
             for img_file in collection_dir.glob("*"):
                 if img_file.is_file():
-                    symlink_path = task_dir / img_file.name
-                    if not symlink_path.exists():
-                        symlink_path.symlink_to(img_file.resolve())
-                        symlink_count += 1
+                    # Check if this file belongs to a case_id in this task
+                    filename_stem = img_file.stem
+                    # Try to match by case_id (file might be named like {case_id}.svs)
+                    file_case_id = filename_stem.split("-")[0] if "-" in filename_stem else filename_stem
+                    if file_case_id in task_case_ids or filename_stem in task_slide_ids:
+                        symlink_path = task_dir / img_file.name
+                        if not symlink_path.exists():
+                            symlink_path.symlink_to(img_file.resolve())
+                            symlink_count += 1
             
             if symlink_count > 0:
                 logger.info(f"  {dataset_name}/{task_name}: {symlink_count} symlinks")

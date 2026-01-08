@@ -550,7 +550,7 @@ class IDRProvider(DatasetProvider):
         slides_dir: Path,
         datasets: list[str] | None = None
     ) -> None:
-        """Create per-task symlink directories."""
+        """Create per-task symlink directories with only task-specific slides."""
         for tsv_path in self._get_all_tsv_files(tasks_dir):
             dataset_name = tsv_path.parent.parent.name
             task_name = tsv_path.parent.name
@@ -564,16 +564,23 @@ class IDRProvider(DatasetProvider):
             if not dataset_dir.exists():
                 continue
             
+            # Get slide IDs needed for this specific task
+            slide_df = self._extract_slide_ids_from_tsv(tsv_path)
+            task_slide_ids = set(slide_df["slide_id"].unique())
+            
             task_dir = slides_dir / "by_task" / dataset_name / task_name
             task_dir.mkdir(parents=True, exist_ok=True)
             
             symlink_count = 0
             for img_file in dataset_dir.glob("*"):
                 if img_file.is_file():
-                    symlink_path = task_dir / img_file.name
-                    if not symlink_path.exists():
-                        symlink_path.symlink_to(img_file.resolve())
-                        symlink_count += 1
+                    # Extract slide_id from filename using provider's method
+                    file_slide_id = self._slide_id_from_filename(img_file.name, dataset_name)
+                    if file_slide_id and file_slide_id in task_slide_ids:
+                        symlink_path = task_dir / img_file.name
+                        if not symlink_path.exists():
+                            symlink_path.symlink_to(img_file.resolve())
+                            symlink_count += 1
             
             if symlink_count > 0:
                 logger.info(f"  {dataset_name}/{task_name}: {symlink_count} symlinks")
