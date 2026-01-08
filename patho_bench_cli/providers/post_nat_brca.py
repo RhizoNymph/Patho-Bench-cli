@@ -36,6 +36,10 @@ class PostNatBrcaProvider(DatasetProvider):
     @property
     def datasets(self) -> list[str]:
         return list(POST_NAT_BRCA_COLLECTION_MAP.keys())
+
+    def get_storage_directories(self, output_dir: Path, datasets: list[str] | None = None) -> list[Path]:
+        """Get collection subdirectory for POST-NAT-BRCA."""
+        return [output_dir / POST_NAT_BRCA_COLLECTION]
     
     def _get_all_tsv_files(self, tasks_dir: Path) -> list[Path]:
         """Find all k=all.tsv files in the tasks directory."""

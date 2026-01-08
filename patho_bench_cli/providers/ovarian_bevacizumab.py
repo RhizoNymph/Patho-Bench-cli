@@ -36,6 +36,10 @@ class OvarianBevacizumabProvider(DatasetProvider):
     @property
     def datasets(self) -> list[str]:
         return list(OVARIAN_BEV_COLLECTION_MAP.keys())
+
+    def get_storage_directories(self, output_dir: Path, datasets: list[str] | None = None) -> list[Path]:
+        """Get collection subdirectory for Ovarian Bevacizumab Response."""
+        return [output_dir / OVARIAN_BEV_COLLECTION]
     
     def _get_all_tsv_files(self, tasks_dir: Path) -> list[Path]:
         """Find all k=all.tsv files in the tasks directory."""

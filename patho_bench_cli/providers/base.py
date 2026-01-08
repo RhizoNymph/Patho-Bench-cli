@@ -143,3 +143,17 @@ class DatasetProvider(ABC):
         manifest_df.to_csv(manifest_path, index=False)
         
         return manifest_path
+
+    def get_storage_directories(self, output_dir: Path, datasets: list[str] | None = None) -> list[Path]:
+        """
+        Get the directories where slides for the given datasets are stored.
+        Standard implementation returns the root output_dir.
+        
+        Args:
+            output_dir: Root slides directory.
+            datasets: Optional list of dataset names.
+            
+        Returns:
+            List of Paths to subdirectories.
+        """
+        return [output_dir]

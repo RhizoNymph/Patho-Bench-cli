@@ -45,6 +45,24 @@ class CPTACProvider(DatasetProvider):
     @property
     def datasets(self) -> list[str]:
         return list(CPTAC_COLLECTION_MAP.keys())
+
+    def get_storage_directories(self, output_dir: Path, datasets: list[str] | None = None) -> list[Path]:
+        """Get collection subdirectories for the requested datasets."""
+        collections = set()
+        target_datasets = datasets if datasets else self.datasets
+        for ds in target_datasets:
+            coll = CPTAC_COLLECTION_MAP.get(ds)
+            if coll:
+                collections.add(coll)
+            elif ds == "cptac_lung":
+                collections.add("CPTAC-LUAD")
+                collections.add("CPTAC-LSCC")
+            elif ds == "cptac_all":
+                for c in CPTAC_COLLECTION_MAP.values():
+                    if c:
+                        collections.add(c)
+        
+        return [output_dir / coll for coll in sorted(collections)]
     
     def _get_all_tsv_files(self, tasks_dir: Path) -> list[Path]:
         """Find all k=all.tsv files in the tasks directory."""

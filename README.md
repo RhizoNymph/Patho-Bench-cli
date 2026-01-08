@@ -19,49 +19,49 @@ pip install -e .
 First, download the Patho-Bench task definitions from HuggingFace:
 
 ```bash
-patho-bench-dl tasks
+patho-bench-cli tasks
 ```
 
 ### List available datasets
 
 ```bash
 # List all providers
-patho-bench-dl list
+patho-bench-cli list
 
 # List datasets for a specific provider
-patho-bench-dl list cptac
-patho-bench-dl list panda
-patho-bench-dl list ovarian_bevacizumab
-patho-bench-dl list post_nat_brca
-patho-bench-dl list idr
+patho-bench-cli list cptac
+patho-bench-cli list panda
+patho-bench-cli list ovarian_bevacizumab
+patho-bench-cli list post_nat_brca
+patho-bench-cli list idr
 ```
 
 ### Download slides
 
 ```bash
 # Download CPTAC slides needed for Patho-Bench (dry-run, creates manifest)
-patho-bench-dl download cptac
+patho-bench-cli download cptac
 
 # Actually download
-patho-bench-dl download cptac --download
+patho-bench-cli download cptac --download
 
 # Download specific datasets
-patho-bench-dl download cptac --datasets cptac_ccrcc cptac_brca --download
+patho-bench-cli download cptac --datasets cptac_ccrcc cptac_brca --download
 
 # Download with per-task symlinks
-patho-bench-dl download cptac --download --create-symlinks
+patho-bench-cli download cptac --download --create-symlinks
 
 # Download PANDA slides
-patho-bench-dl download panda --download
+patho-bench-cli download panda --download
 
 # Download Ovarian Bevacizumab Response slides
-patho-bench-dl download ovarian_bevacizumab --download
+patho-bench-cli download ovarian_bevacizumab --download
 
 # Download POST-NAT-BRCA slides
-patho-bench-dl download post_nat_brca --download
+patho-bench-cli download post_nat_brca --download
 
 # Download IDR slides (via BioImage Archive)
-patho-bench-dl download idr --download
+patho-bench-cli download idr --download
 ```
 
 ### Full dataset download
@@ -69,10 +69,25 @@ patho-bench-dl download idr --download
 Download entire datasets (not just Patho-Bench slides):
 
 ```bash
-patho-bench-dl download cptac --full --datasets cptac_ccrcc
-patho-bench-dl download panda --full
-patho-bench-dl download ovarian_bevacizumab --full
-patho-bench-dl download post_nat_brca --full
+patho-bench-cli download cptac --full --datasets cptac_ccrcc
+patho-bench-cli download panda --full
+patho-bench-cli download ovarian_bevacizumab --full
+patho-bench-cli download post_nat_brca --full
+```
+
+### Verify and clean slides
+
+Recursively check if WSI files can be opened with OpenSlide:
+
+```bash
+# Verify slides in a directory
+patho-bench-cli verify /path/to/slides
+
+# Verify and delete invalid slides
+patho-bench-cli verify /path/to/slides --delete
+
+# Use specific number of parallel jobs
+patho-bench-cli verify /path/to/slides --jobs 8
 ```
 
 ## Data Sources

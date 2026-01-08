@@ -73,6 +73,11 @@ class IDRProvider(DatasetProvider):
     @property
     def datasets(self) -> list[str]:
         return list(IDR_DATASETS.keys())
+
+    def get_storage_directories(self, output_dir: Path, datasets: list[str] | None = None) -> list[Path]:
+        """Get subdirectories for the requested IDR datasets."""
+        target_datasets = datasets if datasets else self.datasets
+        return [output_dir / ds for ds in target_datasets if ds in IDR_DATASETS]
     
     def _get_all_tsv_files(self, tasks_dir: Path) -> list[Path]:
         """Find all k=all.tsv files in the tasks directory."""
@@ -136,7 +141,7 @@ class IDRProvider(DatasetProvider):
             dataset_name: The patho-bench dataset name
             
         Returns:
-            List of dicts with slide_id, filename, url
+            List of dicts with slide_id, filename, url, size_str
         """
         config = IDR_DATASETS.get(dataset_name)
         if not config:
@@ -153,17 +158,48 @@ class IDRProvider(DatasetProvider):
             response.raise_for_status()
             
             # Parse directory listing (simple HTML parsing)
+            # Example: <tr>...<a href="S59_HandE.ndpi">S59_HandE.ndpi</a>...<td align="right"> 70M</td>...</tr>
             files = []
-            for match in re.finditer(r'href="([^"]+)"', response.text):
-                filename = match.group(1)
+            
+            # First find all rows
+            for row_match in re.finditer(r'<tr>(.*?)</tr>', response.text, re.DOTALL):
+                row_html = row_match.group(1)
+                
+                # Find href and size in this row
+                href_match = re.search(r'href="([^"]+)"', row_html)
+                if not href_match:
+                    continue
+                    
+                filename = href_match.group(1)
                 if filename.endswith(ext) and not filename.endswith('.ndpa'):
                     slide_id = self._slide_id_from_filename(filename, dataset_name)
                     if slide_id:
+                        # Try to find size (usually in the next td)
+                        size_str = None
+                        size_match = re.search(r'<td align="right">\s*([0-9.]+[KMG]?)</td>', row_html)
+                        if size_match:
+                            size_str = size_match.group(1)
+                        
                         files.append({
                             "slide_id": slide_id,
                             "filename": filename,
                             "url": f"{base_url}{filename}",
+                            "size_str": size_str,
                         })
+            
+            if not files:
+                # Fallback to simple regex if table parsing failed
+                for match in re.finditer(r'href="([^"]+)"', response.text):
+                    filename = match.group(1)
+                    if filename.endswith(ext) and not filename.endswith('.ndpa'):
+                        slide_id = self._slide_id_from_filename(filename, dataset_name)
+                        if slide_id:
+                            files.append({
+                                "slide_id": slide_id,
+                                "filename": filename,
+                                "url": f"{base_url}{filename}",
+                                "size_str": None,
+                            })
             
             logger.info(f"Found {len(files)} slide files")
             return files
@@ -201,6 +237,7 @@ class IDRProvider(DatasetProvider):
                     row["slide_id"]: {
                         "filename": row["filename"],
                         "url": row["url"],
+                        "size_str": row["size_str"] if "size_str" in row and pd.notna(row["size_str"]) else None,
                     }
                     for _, row in df.iterrows()
                 }
@@ -213,6 +250,7 @@ class IDRProvider(DatasetProvider):
             f["slide_id"]: {
                 "filename": f["filename"],
                 "url": f["url"],
+                "size_str": f.get("size_str"),
             }
             for f in files
         }
@@ -225,6 +263,7 @@ class IDRProvider(DatasetProvider):
                     "slide_id": sid,
                     "filename": info["filename"],
                     "url": info["url"],
+                    "size_str": info.get("size_str"),
                 }
                 for sid, info in slides_info.items()
             ]
@@ -232,6 +271,19 @@ class IDRProvider(DatasetProvider):
             logger.info(f"Cached file list to {cache_file}")
         
         return slides_info
+    
+    def _get_local_slide_ids(self, dataset_dir: Path, dataset_name: str) -> dict[str, str]:
+        """Index existing files in the dataset directory by their slide_id."""
+        local_files = {}
+        if not dataset_dir.exists():
+            return local_files
+            
+        for f in dataset_dir.glob("*"):
+            if f.is_file() and not f.name.endswith(".tmp"):
+                sid = self._slide_id_from_filename(f.name, dataset_name)
+                if sid:
+                    local_files[sid] = f.name
+        return local_files
     
     def list_tasks(self, tasks_dir: Path) -> list[dict[str, Any]]:
         """List all available IDR tasks."""
@@ -395,6 +447,20 @@ class IDRProvider(DatasetProvider):
         
         return downloaded, failed, failed_ids
     
+    def _parse_size(self, size_str: str | None) -> int | None:
+        """Parse size string (e.g., '70M', '1.2G', '500K') into bytes."""
+        if not size_str:
+            return None
+        try:
+            units = {"K": 1024, "M": 1024**2, "G": 1024**3}
+            match = re.search(r"([0-9.]+)([KMG]?)", size_str)
+            if not match:
+                return None
+            value, unit = match.groups()
+            return int(float(value) * units.get(unit, 1))
+        except Exception:
+            return None
+
     def download_slides(
         self,
         slide_ids: set[str],
@@ -434,6 +500,9 @@ class IDRProvider(DatasetProvider):
             skipped = 0
             not_found = 0
             
+            # Index local files once for efficiency
+            local_files = self._get_local_slide_ids(dataset_dir, dataset_name)
+            
             for slide_id in slide_ids:
                 if slide_id not in available_slides:
                     not_found += 1
@@ -442,11 +511,43 @@ class IDRProvider(DatasetProvider):
                 file_info = available_slides[slide_id]
                 filename = file_info["filename"]
                 url = file_info["url"]
+                expected_size = self._parse_size(file_info.get("size_str"))
                 output_path = dataset_dir / filename
                 
+                # Check 1: Exact filename match
+                n_exists = 0
                 if output_path.exists():
-                    skipped += 1
-                    continue
+                    # Optional size validation
+                    if expected_size:
+                        actual_size = output_path.stat().st_size
+                        # Allow 5% tolerance due to rounding in HTML listing
+                        if abs(actual_size - expected_size) / expected_size < 0.05:
+                            skipped += 1
+                            continue
+                        else:
+                            logger.warning(f"  Slide {slide_id} exists but size mismatch ({actual_size} vs {expected_size}), redownloading")
+                    else:
+                        logger.info(f"  Slide {slide_id} already exists (exact match)")
+                        skipped += 1
+                        continue
+                
+                # Check 2: Existing file with different name but matching slide_id
+                if slide_id in local_files:
+                    existing_name = local_files[slide_id]
+                    existing_path = dataset_dir / existing_name
+                    
+                    if expected_size:
+                        actual_size = existing_path.stat().st_size
+                        if abs(actual_size - expected_size) / expected_size < 0.05:
+                            logger.info(f"  Slide {slide_id} already exists as {existing_name}")
+                            skipped += 1
+                            continue
+                        else:
+                            logger.warning(f"  Slide {slide_id} exists as {existing_name} but size mismatch, redownloading")
+                    else:
+                        logger.info(f"  Slide {slide_id} already exists as {existing_name}")
+                        skipped += 1
+                        continue
                 
                 downloads.append((slide_id, url, output_path))
             
@@ -464,10 +565,11 @@ class IDRProvider(DatasetProvider):
                 downloaded = 0
                 failed = 0
             
-            logger.info(
-                f"Download complete for {dataset_name}: "
-                f"{downloaded} downloaded, {skipped} skipped, {failed} failed, {not_found} not found"
-            )
+            if downloaded > 0 or failed > 0 or skipped > 0:
+                logger.info(
+                    f"Download complete for {dataset_name}: "
+                    f"{downloaded} downloaded, {skipped} skipped, {failed} failed, {not_found} not found"
+                )
         
         # Create symlinks if requested
         if create_symlinks and tasks_dir:
@@ -510,14 +612,49 @@ class IDRProvider(DatasetProvider):
             downloads = []
             skipped = 0
             
+            # Index local files once for efficiency
+            local_files = self._get_local_slide_ids(dataset_dir, dataset_name)
+            
             for slide_id, file_info in available_slides.items():
                 filename = file_info["filename"]
                 url = file_info["url"]
+                expected_size = self._parse_size(file_info.get("size_str"))
                 output_path = dataset_dir / filename
                 
+                # Check 1: Exact filename match
                 if output_path.exists():
-                    skipped += 1
-                    continue
+                    # Optional size validation
+                    if expected_size:
+                        actual_size = output_path.stat().st_size
+                        # Allow 5% tolerance due to rounding in HTML listing
+                        if abs(actual_size - expected_size) / expected_size < 0.05:
+                            logger.info(f"  Slide {slide_id} already exists (exact match)")
+                            skipped += 1
+                            continue
+                        else:
+                            logger.warning(f"  Slide {slide_id} exists but size mismatch ({actual_size} vs {expected_size}), redownloading")
+                    else:
+                        logger.info(f"  Slide {slide_id} already exists (exact match)")
+                        skipped += 1
+                        continue
+                
+                # Check 2: Existing file with different name but matching slide_id
+                if slide_id in local_files:
+                    existing_name = local_files[slide_id]
+                    existing_path = dataset_dir / existing_name
+                    
+                    if expected_size:
+                        actual_size = existing_path.stat().st_size
+                        if abs(actual_size - expected_size) / expected_size < 0.05:
+                            logger.info(f"  Slide {slide_id} already exists as {existing_name}")
+                            skipped += 1
+                            continue
+                        else:
+                            logger.warning(f"  Slide {slide_id} exists as {existing_name} but size mismatch, redownloading")
+                    else:
+                        logger.info(f"  Slide {slide_id} already exists as {existing_name}")
+                        skipped += 1
+                        continue
                 
                 downloads.append((slide_id, url, output_path))
             
@@ -535,10 +672,11 @@ class IDRProvider(DatasetProvider):
                 downloaded = 0
                 failed = 0
             
-            logger.info(
-                f"Download complete for {dataset_name}: "
-                f"{downloaded} downloaded, {skipped} skipped, {failed} failed"
-            )
+            if downloaded > 0 or failed > 0 or skipped > 0:
+                logger.info(
+                    f"Download complete for {dataset_name}: "
+                    f"{downloaded} downloaded, {skipped} skipped, {failed} failed"
+                )
         
         # Create symlinks if requested
         if create_symlinks and tasks_dir:
