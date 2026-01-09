@@ -143,14 +143,20 @@ def cmd_list(args):
 
 def cmd_download(args):
     """Handle the 'download' subcommand."""
-    try:
-        provider = get_provider(args.provider)
-    except KeyError as e:
-        print(f"Error: {e}", file=sys.stderr)
-        return 1
-    
     tasks_dir = Path(args.tasks_dir)
     output_dir = Path(args.output_dir)
+
+    if args.provider == 'all':
+        if args.datasets:
+            print("Error: Dataset filtering is not allowed when provider is 'all'", file=sys.stderr)
+            return 1
+        providers = sorted(list_providers().values(), key=lambda p: p.name)
+    else:
+        try:
+            providers = [get_provider(args.provider)]
+        except KeyError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            return 1
     
     # Auto-download tasks if needed for patho-bench mode
     if not args.full and not tasks_dir.exists():
@@ -164,150 +170,153 @@ def cmd_download(args):
         )
         print(f"Tasks downloaded to: {tasks_dir}\n")
     
-    print(f"Provider: {provider.name}")
-    print(f"Output: {output_dir}")
-    print(f"Mode: {'Full dataset' if args.full else 'Patho-Bench slides only'}")
+    for provider in providers:
+        print(f"\n{'='*60}")
+        print(f"Provider: {provider.name}")
+        print(f"Output: {output_dir}")
+        print(f"Mode: {'Full dataset' if args.full else 'Patho-Bench slides only'}")
+        print(f"{'='*60}")
     
-    all_slide_ids = set()
-    if not args.full:
-        # Get slide IDs from task files
-        slide_ids_by_dataset = provider.get_slide_ids_for_tasks(
-            tasks_dir=tasks_dir,
-            datasets=args.datasets,
-        )
-        
-        if not slide_ids_by_dataset:
-            print("No slides found for the specified datasets.")
-            return 1
-        
-        # Combine all slide IDs
-        for ids in slide_ids_by_dataset.values():
-            all_slide_ids.update(ids)
-        
-        print(f"\nTotal unique slides needed: {len(all_slide_ids)}")
-        
-        # Generate manifest
-        manifest_path = provider.generate_manifest(
-            slide_ids=all_slide_ids,
-            output_dir=output_dir,
-            tasks_info=slide_ids_by_dataset,
-        )
-        print(f"Manifest saved: {manifest_path}")
-
-    if args.download:
-        print("\nDownloading slides...")
-        
-        # Shared download helper
-        def do_download(ids_to_download=None):
-            # Filter out arguments already passed explicitly to avoid TypeErrors
-            kwargs = {k: v for k, v in vars(args).items() if k not in [
-                'slide_ids', 'output_dir', 'create_symlinks', 'tasks_dir', 'datasets'
-            ]}
-            if args.full and ids_to_download is None:
-                provider.download_full(
-                    output_dir=output_dir,
-                    datasets=args.datasets,
-                    create_symlinks=args.create_symlinks,
-                    tasks_dir=tasks_dir,
-                    **kwargs
-                )
-            else:
-                # If ids_to_download is None here, it means we're in Patho-Bench mode initial download
-                target_ids = ids_to_download if ids_to_download is not None else all_slide_ids
-                provider.download_slides(
-                    slide_ids=target_ids,
-                    output_dir=output_dir,
-                    create_symlinks=args.create_symlinks,
-                    tasks_dir=tasks_dir,
-                    datasets=args.datasets,
-                    **kwargs
-                )
-
-        # Initial download
-        if args.full:
-            do_download()
-        else:
-            do_download(all_slide_ids)
-        
-        if args.verify:
-            # Common WSI extensions
-            extensions = {'.svs', '.tif', '.tiff', '.ndpi', '.mrxs', '.scn', '.bif', '.vms', '.vmu'}
+        all_slide_ids = set()
+        if not args.full:
+            # Get slide IDs from task files
+            slide_ids_by_dataset = provider.get_slide_ids_for_tasks(
+                tasks_dir=tasks_dir,
+                datasets=args.datasets,
+            )
             
-            attempt = 0
-            max_attempts = getattr(args, 'max_retries', 3)
-            while attempt < max_attempts:
-                print(f"\nVerifying downloaded slides (Attempt {attempt + 1}/{max_attempts})...")
-                
-                # Find downloaded files (excluding symlinks) in target directories
-                storage_dirs = provider.get_storage_directories(output_dir, args.datasets)
-                wsi_paths = []
-                for s_dir in storage_dirs:
-                    if not s_dir.exists():
-                        continue
-                    for p in s_dir.rglob("*"):
-                        if p.suffix.lower() in extensions and not p.is_symlink():
-                            # In Patho-Bench mode, only verify slides we explicitly wanted
-                            # (Avoids verifying entire shared directory)
-                            if args.full or not all_slide_ids or p.stem in all_slide_ids:
-                                wsi_paths.append(p)
-                
-                if not wsi_paths:
-                    print("No WSI files found to verify.")
-                    break
-                    
-                passed, failed = verify_slides_in_parallel(
-                    wsi_paths, 
-                    args.jobs, 
-                    delete=True,  # Always delete failed so we can redownload
-                    verbose=args.verbose
-                )
-                
-                if not failed:
-                    print("All slides verified successfully!")
-                    break
-                    
-                print(f"{len(failed)} slides failed verification and were deleted.")
-                attempt += 1
-                
-                if attempt < max_attempts:
-                    # Identify slide IDs for failed files
-                    failed_slide_ids = set()
-                    failed_filenames = {p.name for p, _, _ in failed}
-                    
-                    # Heuristic 1: If we have all_slide_ids, use them
-                    if all_slide_ids:
-                        for sid in all_slide_ids:
-                            for ext in extensions:
-                                if f"{sid}{ext}" in failed_filenames:
-                                    failed_slide_ids.add(sid)
-                    
-                    # Heuristic 2: If heuristic 1 missed some, or we don't have all_slide_ids (full mode)
-                    # use the filename stem as slide_id
-                    if len(failed_slide_ids) < len(failed):
-                        found_names = {p.name for p, _, _ in failed}
-                        for fname in found_names:
-                            # Skip if already found via Heuristic 1
-                            already_found = False
-                            for sid in failed_slide_ids:
-                                if fname.startswith(sid):
-                                    already_found = True
-                                    break
-                            if not already_found:
-                                # Just use the stem
-                                failed_slide_ids.add(Path(fname).stem)
+            if not slide_ids_by_dataset:
+                print(f"No slides found for the specified datasets in {provider.name}.")
+                continue
+            
+            # Combine all slide IDs
+            for ids in slide_ids_by_dataset.values():
+                all_slide_ids.update(ids)
+            
+            print(f"\nTotal unique slides needed: {len(all_slide_ids)}")
+            
+            # Generate manifest
+            manifest_path = provider.generate_manifest(
+                slide_ids=all_slide_ids,
+                output_dir=output_dir,
+                tasks_info=slide_ids_by_dataset,
+            )
+            print(f"Manifest saved: {manifest_path}")
 
-                    if failed_slide_ids:
-                        print(f"Retrying download for {len(failed_slide_ids)} slides...")
-                        do_download(failed_slide_ids)
-                    else:
-                        print("Nothing to retry (could not map files).")
-                        break
+        if args.download:
+            print("\nDownloading slides...")
+            
+            # Shared download helper
+            def do_download(ids_to_download=None):
+                # Filter out arguments already passed explicitly to avoid TypeErrors
+                kwargs = {k: v for k, v in vars(args).items() if k not in [
+                    'slide_ids', 'output_dir', 'create_symlinks', 'tasks_dir', 'datasets', 'provider'
+                ]}
+                if args.full and ids_to_download is None:
+                    provider.download_full(
+                        output_dir=output_dir,
+                        datasets=args.datasets,
+                        create_symlinks=args.create_symlinks,
+                        tasks_dir=tasks_dir,
+                        **kwargs
+                    )
                 else:
-                    print("Reached maximum retry attempts.")
+                    # If ids_to_download is None here, it means we're in Patho-Bench mode initial download
+                    target_ids = ids_to_download if ids_to_download is not None else all_slide_ids
+                    provider.download_slides(
+                        slide_ids=target_ids,
+                        output_dir=output_dir,
+                        create_symlinks=args.create_symlinks,
+                        tasks_dir=tasks_dir,
+                        datasets=args.datasets,
+                        **kwargs
+                    )
 
-        print("\nDownload process complete!")
-    else:
-        print("\nDry run complete. Use --download to actually download slides.")
+            # Initial download
+            if args.full:
+                do_download()
+            else:
+                do_download(all_slide_ids)
+            
+            if args.verify:
+                # Common WSI extensions
+                extensions = {'.svs', '.tif', '.tiff', '.ndpi', '.mrxs', '.scn', '.bif', '.vms', '.vmu'}
+                
+                attempt = 0
+                max_attempts = getattr(args, 'max_retries', 3)
+                while attempt < max_attempts:
+                    print(f"\nVerifying downloaded slides (Attempt {attempt + 1}/{max_attempts})...")
+                    
+                    # Find downloaded files (excluding symlinks) in target directories
+                    storage_dirs = provider.get_storage_directories(output_dir, args.datasets)
+                    wsi_paths = []
+                    for s_dir in storage_dirs:
+                        if not s_dir.exists():
+                            continue
+                        for p in s_dir.rglob("*"):
+                            if p.suffix.lower() in extensions and not p.is_symlink():
+                                # In Patho-Bench mode, only verify slides we explicitly wanted
+                                # (Avoids verifying entire shared directory)
+                                if args.full or not all_slide_ids or p.stem in all_slide_ids:
+                                    wsi_paths.append(p)
+                    
+                    if not wsi_paths:
+                        print("No WSI files found to verify.")
+                        break
+                        
+                    passed, failed = verify_slides_in_parallel(
+                        wsi_paths, 
+                        args.jobs, 
+                        delete=True,  # Always delete failed so we can redownload
+                        verbose=args.verbose
+                    )
+                    
+                    if not failed:
+                        print("All slides verified successfully!")
+                        break
+                        
+                    print(f"{len(failed)} slides failed verification and were deleted.")
+                    attempt += 1
+                    
+                    if attempt < max_attempts:
+                        # Identify slide IDs for failed files
+                        failed_slide_ids = set()
+                        failed_filenames = {p.name for p, _, _ in failed}
+                        
+                        # Heuristic 1: If we have all_slide_ids, use them
+                        if all_slide_ids:
+                            for sid in all_slide_ids:
+                                for ext in extensions:
+                                    if f"{sid}{ext}" in failed_filenames:
+                                        failed_slide_ids.add(sid)
+                        
+                        # Heuristic 2: If heuristic 1 missed some, or we don't have all_slide_ids (full mode)
+                        # use the filename stem as slide_id
+                        if len(failed_slide_ids) < len(failed):
+                            found_names = {p.name for p, _, _ in failed}
+                            for fname in found_names:
+                                # Skip if already found via Heuristic 1
+                                already_found = False
+                                for sid in failed_slide_ids:
+                                    if fname.startswith(sid):
+                                        already_found = True
+                                        break
+                                if not already_found:
+                                    # Just use the stem
+                                    failed_slide_ids.add(Path(fname).stem)
+
+                        if failed_slide_ids:
+                            print(f"Retrying download for {len(failed_slide_ids)} slides...")
+                            do_download(failed_slide_ids)
+                        else:
+                            print("Nothing to retry (could not map files).")
+                            break
+                    else:
+                        print("Reached maximum retry attempts.")
+
+            print(f"\nDownload process complete for {provider.name}!")
+        else:
+            print(f"\nDry run complete for {provider.name}. Use --download to actually download slides.")
     
     return 0
 
@@ -538,15 +547,24 @@ def create_embedding_symlinks(
 
 def cmd_embed(args):
     """Handle the 'embed' subcommand - generate embeddings using TRIDENT."""
-    try:
-        provider = get_provider(args.provider)
-    except KeyError as e:
-        print(f"Error: {e}", file=sys.stderr)
-        return 1
-
     tasks_dir = Path(args.tasks_dir)
     slides_dir = Path(args.slides_dir)
     embeddings_dir = Path(args.embeddings_dir)
+
+    if args.provider == 'all':
+        if args.datasets:
+            print("Error: Dataset filtering is not allowed when provider is 'all'", file=sys.stderr)
+            return 1
+        if args.tasks:
+            print("Error: Task filtering is not allowed when provider is 'all'", file=sys.stderr)
+            return 1
+        providers = sorted(list_providers().values(), key=lambda p: p.name)
+    else:
+        try:
+            providers = [get_provider(args.provider)]
+        except KeyError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            return 1
 
     if not tasks_dir.exists():
         print(f"Error: Tasks directory not found: {tasks_dir}", file=sys.stderr)
@@ -558,128 +576,131 @@ def cmd_embed(args):
         print("Make sure you've downloaded slides with 'patho-bench-cli download --create-symlinks'", file=sys.stderr)
         return 1
 
-    # Get all tasks for the provider
-    all_tasks = provider.list_tasks(tasks_dir)
-
-    # Filter by datasets if specified
-    if args.datasets:
-        all_tasks = [t for t in all_tasks if t['dataset'] in args.datasets]
-
-    # Filter by specific tasks if specified
-    if args.tasks:
-        all_tasks = [t for t in all_tasks if t['task'] in args.tasks]
-
-    if not all_tasks:
-        print("No tasks found matching the specified criteria.", file=sys.stderr)
-        return 1
-
-    print(f"Provider: {provider.name}")
-    print(f"Patch encoder: {args.patch_encoder}")
-    print(f"Magnification: {args.mag}x")
-    print(f"Patch size: {args.patch_size}px")
-    print(f"Tasks to process: {len(all_tasks)}")
-
-    # Group tasks by dataset
-    tasks_by_dataset = {}
-    for task in all_tasks:
-        dataset = task['dataset']
-        if dataset not in tasks_by_dataset:
-            tasks_by_dataset[dataset] = []
-        tasks_by_dataset[dataset].append(task)
-
     # Find TRIDENT script
     trident_script = Path(__file__).parent.parent / "TRIDENT" / "run_batch_of_slides.py"
     if not trident_script.exists():
         print(f"Error: TRIDENT script not found at {trident_script}", file=sys.stderr)
         return 1
 
-    # Process each dataset
     total_success = 0
     total_failed = 0
 
-    for dataset, tasks in tasks_by_dataset.items():
+    for provider in providers:
         print(f"\n{'='*60}")
-        print(f"Processing dataset: {dataset}")
+        print(f"Processing provider: {provider.name}")
         print(f"{'='*60}")
+        
+        # Get all tasks for the provider
+        all_tasks = provider.list_tasks(tasks_dir)
 
-        for task_info in tasks:
-            task = task_info['task']
-            print(f"\nTask: {task} ({task_info['n_slides']} slides)")
+        # Filter by datasets if specified
+        if args.datasets:
+            all_tasks = [t for t in all_tasks if t['dataset'] in args.datasets]
 
-            # Define paths
-            task_slides_dir = slides_dir / dataset / task
-            dataset_embeddings_dir = embeddings_dir / args.patch_encoder / dataset
-            task_embeddings_symlinks_dir = embeddings_dir / args.patch_encoder / "by_task" / dataset / task
+        # Filter by specific tasks if specified
+        if args.tasks:
+            all_tasks = [t for t in all_tasks if t['task'] in args.tasks]
 
-            if not task_slides_dir.exists():
-                print(f"  Warning: Slides directory not found: {task_slides_dir}", file=sys.stderr)
-                print(f"  Skipping task {task}", file=sys.stderr)
-                total_failed += 1
-                continue
+        if not all_tasks:
+            print(f"No tasks found matching the specified criteria for {provider.name}.", file=sys.stderr)
+            continue
 
-            # Create embeddings directory
-            dataset_embeddings_dir.mkdir(parents=True, exist_ok=True)
+        print(f"Patch encoder: {args.patch_encoder}")
+        print(f"Magnification: {args.mag}x")
+        print(f"Patch size: {args.patch_size}px")
+        print(f"Tasks to process: {len(all_tasks)}")
 
-            # Build TRIDENT command using current Python interpreter
-            cmd = [
-                sys.executable,  # Use the current Python interpreter
-                str(trident_script),
-                "--task", "all",
-                "--wsi_dir", str(task_slides_dir),
-                "--job_dir", str(dataset_embeddings_dir),
-                "--patch_encoder", args.patch_encoder,
-                "--mag", str(args.mag),
-                "--patch_size", str(args.patch_size),
-            ]
+        # Group tasks by dataset
+        tasks_by_dataset = {}
+        for task in all_tasks:
+            dataset = task['dataset']
+            if dataset not in tasks_by_dataset:
+                tasks_by_dataset[dataset] = []
+            tasks_by_dataset[dataset].append(task)
 
-            # Add optional arguments
-            if args.gpu is not None:
-                cmd.extend(["--gpu", str(args.gpu)])
-            if args.batch_size:
-                cmd.extend(["--batch_size", str(args.batch_size)])
-            if args.skip_errors:
-                cmd.append("--skip_errors")
+        # Process each dataset
+        for dataset, tasks in tasks_by_dataset.items():
+            print(f"\nProcessing dataset: {dataset}")
 
-            print(f"  Running TRIDENT...")
-            print(f"  Command: {' '.join(cmd)}")
+            for task_info in tasks:
+                task = task_info['task']
+                print(f"\nTask: {task} ({task_info['n_slides']} slides)")
 
-            try:
-                result = subprocess.run(
-                    cmd,
-                    cwd=trident_script.parent,
-                    check=True,
-                    capture_output=not args.verbose
-                )
-                print(f"  ✓ TRIDENT completed successfully")
-                total_success += 1
-            except subprocess.CalledProcessError as e:
-                print(f"  ✗ TRIDENT failed with exit code {e.returncode}", file=sys.stderr)
-                if args.verbose and e.stdout:
-                    print(f"  stdout: {e.stdout.decode()}", file=sys.stderr)
-                if args.verbose and e.stderr:
-                    print(f"  stderr: {e.stderr.decode()}", file=sys.stderr)
-                total_failed += 1
-                continue
+                # Define paths
+                task_slides_dir = slides_dir / dataset / task
+                dataset_embeddings_dir = embeddings_dir / args.patch_encoder / dataset
+                task_embeddings_symlinks_dir = embeddings_dir / args.patch_encoder / "by_task" / dataset / task
 
-            # Create symlinks
-            if args.create_symlinks:
-                print(f"  Creating symlinks...")
-                # Read slide IDs from the task file
-                task_file = tasks_dir / dataset / task / "k=all.tsv"
-                if task_file.exists():
-                    task_df = pd.read_csv(task_file, sep='\t')
-                    slide_ids = set(task_df['slide_id'].unique())
+                if not task_slides_dir.exists():
+                    print(f"  Warning: Slides directory not found: {task_slides_dir}", file=sys.stderr)
+                    print(f"  Skipping task {task}", file=sys.stderr)
+                    total_failed += 1
+                    continue
 
-                    n_symlinks = create_embedding_symlinks(
-                        embeddings_dir=dataset_embeddings_dir,
-                        by_task_dir=task_embeddings_symlinks_dir,
-                        dataset=dataset,
-                        task=task,
-                        slide_ids=slide_ids
+                # Create embeddings directory
+                dataset_embeddings_dir.mkdir(parents=True, exist_ok=True)
+
+                # Build TRIDENT command using current Python interpreter
+                cmd = [
+                    sys.executable,  # Use the current Python interpreter
+                    str(trident_script),
+                    "--task", "all",
+                    "--wsi_dir", str(task_slides_dir),
+                    "--job_dir", str(dataset_embeddings_dir),
+                    "--patch_encoder", args.patch_encoder,
+                    "--mag", str(args.mag),
+                    "--patch_size", str(args.patch_size),
+                ]
+
+                # Add optional arguments
+                if args.gpu is not None:
+                    cmd.extend(["--gpu", str(args.gpu)])
+                if args.batch_size:
+                    cmd.extend(["--batch_size", str(args.batch_size)])
+                if args.skip_errors:
+                    cmd.append("--skip_errors")
+
+                print(f"  Running TRIDENT...")
+                if args.verbose:
+                    print(f"  Command: {' '.join(cmd)}")
+
+                try:
+                    result = subprocess.run(
+                        cmd,
+                        cwd=trident_script.parent,
+                        check=True,
+                        capture_output=not args.verbose
                     )
-                    print(f"  ✓ Created {n_symlinks} symlinks")
-                else:
-                    print(f"  Warning: Task file not found: {task_file}", file=sys.stderr)
+                    print(f"  ✓ TRIDENT completed successfully")
+                    total_success += 1
+                except subprocess.CalledProcessError as e:
+                    print(f"  ✗ TRIDENT failed with exit code {e.returncode}", file=sys.stderr)
+                    if args.verbose and e.stdout:
+                        print(f"  stdout: {e.stdout.decode()}", file=sys.stderr)
+                    if args.verbose and e.stderr:
+                        print(f"  stderr: {e.stderr.decode()}", file=sys.stderr)
+                    total_failed += 1
+                    continue
+
+                # Create symlinks
+                if args.create_symlinks:
+                    print(f"  Creating symlinks...")
+                    # Read slide IDs from the task file
+                    task_file = tasks_dir / dataset / task / "k=all.tsv"
+                    if task_file.exists():
+                        task_df = pd.read_csv(task_file, sep='\t')
+                        slide_ids = set(task_df['slide_id'].unique())
+
+                        n_symlinks = create_embedding_symlinks(
+                            embeddings_dir=dataset_embeddings_dir,
+                            by_task_dir=task_embeddings_symlinks_dir,
+                            dataset=dataset,
+                            task=task,
+                            slide_ids=slide_ids
+                        )
+                        print(f"  ✓ Created {n_symlinks} symlinks")
+                    else:
+                        print(f"  Warning: Task file not found: {task_file}", file=sys.stderr)
 
     print(f"\n{'='*60}")
     print(f"Embedding generation complete!")
