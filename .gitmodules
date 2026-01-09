@@ -1,3 +1,6 @@
 [submodule "TRIDENT"]
 	path = TRIDENT
 	url = https://github.com/RhizoNymph/TRIDENT
+[submodule "Patho-Bench"]
+	path = Patho-Bench
+	url = https://github.com/mahmoodlab/Patho-Bench
