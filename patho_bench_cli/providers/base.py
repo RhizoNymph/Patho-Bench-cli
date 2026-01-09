@@ -32,12 +32,13 @@ class DatasetProvider(ABC):
         ...
     
     @abstractmethod
-    def list_tasks(self, tasks_dir: Path) -> list[dict[str, Any]]:
+    def list_tasks(self, tasks_dir: Path, datasets: list[str] | None = None) -> list[dict[str, Any]]:
         """
         List all tasks available for this provider.
         
         Args:
             tasks_dir: Path to the tasks directory containing TSV files.
+            datasets: Optional list of specific datasets to filter to.
             
         Returns:
             List of dicts with task info (name, n_slides, n_cases, etc.)

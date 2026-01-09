@@ -52,9 +52,14 @@ class BCNBProvider(DatasetProvider):
             return df[["case_id", "slide_id"]].drop_duplicates()
         return pd.DataFrame(columns=["case_id", "slide_id"])
     
-    def list_tasks(self, tasks_dir: Path) -> list[dict[str, Any]]:
+    def list_tasks(self, tasks_dir: Path, datasets: list[str] | None = None) -> list[dict[str, Any]]:
         """List all available BCNB tasks."""
         tasks = []
+        
+        # BCNB only has one dataset name in Patho-Bench
+        if datasets and "bcnb" not in datasets:
+            return tasks
+            
         for tsv_path in self._get_all_tsv_files(tasks_dir):
             task_name = tsv_path.parent.name
             df = self._extract_slide_ids_from_tsv(tsv_path)

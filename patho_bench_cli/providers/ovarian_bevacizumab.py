@@ -52,7 +52,7 @@ class OvarianBevacizumabProvider(DatasetProvider):
             return df[["case_id", "slide_id"]].drop_duplicates()
         return pd.DataFrame(columns=["case_id", "slide_id"])
     
-    def list_tasks(self, tasks_dir: Path) -> list[dict[str, Any]]:
+    def list_tasks(self, tasks_dir: Path, datasets: list[str] | None = None) -> list[dict[str, Any]]:
         """List all available Ovarian Bevacizumab Response tasks."""
         tasks = []
         for tsv_path in self._get_all_tsv_files(tasks_dir):
@@ -60,6 +60,10 @@ class OvarianBevacizumabProvider(DatasetProvider):
             if dataset_name not in OVARIAN_BEV_COLLECTION_MAP:
                 continue
             
+            # Filter to requested datasets
+            if datasets and dataset_name not in datasets:
+                continue
+                
             task_name = tsv_path.parent.name
             df = self._extract_slide_ids_from_tsv(tsv_path)
             tcia_collection = OVARIAN_BEV_COLLECTION_MAP.get(dataset_name)

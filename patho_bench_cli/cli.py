@@ -590,12 +590,8 @@ def cmd_embed(args):
         print(f"Processing provider: {provider.name}")
         print(f"{'='*60}")
         
-        # Get all tasks for the provider
-        all_tasks = provider.list_tasks(tasks_dir)
-
-        # Filter by datasets if specified
-        if args.datasets:
-            all_tasks = [t for t in all_tasks if t['dataset'] in args.datasets]
+        # Get all tasks for the provider, optionally filtered by datasets
+        all_tasks = provider.list_tasks(tasks_dir, datasets=args.datasets)
 
         # Filter by specific tasks if specified
         if args.tasks:
