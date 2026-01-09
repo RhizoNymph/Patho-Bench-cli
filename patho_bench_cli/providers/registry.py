@@ -38,12 +38,8 @@ def list_providers() -> dict[str, DatasetProvider]:
 # Auto-register providers on import
 def _auto_register():
     """Import and register all built-in providers."""
-    from patho_bench_cli.providers.cptac import CPTACProvider
-    from patho_bench_cli.providers.panda import PANDAProvider
-    from patho_bench_cli.providers.imp import IMPProvider
-    from patho_bench_cli.providers.ovarian_bevacizumab import OvarianBevacizumabProvider
-    from patho_bench_cli.providers.post_nat_brca import PostNatBrcaProvider
     from patho_bench_cli.providers.idr import IDRProvider
+    from patho_bench_cli.providers.bcnb import BCNBProvider
     
     register_provider(CPTACProvider())
     register_provider(PANDAProvider())
@@ -51,6 +47,7 @@ def _auto_register():
     register_provider(OvarianBevacizumabProvider())
     register_provider(PostNatBrcaProvider())
     register_provider(IDRProvider())
+    register_provider(BCNBProvider())
 
 
 _auto_register()
