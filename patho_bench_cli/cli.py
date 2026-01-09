@@ -373,7 +373,7 @@ def verify_slides_in_parallel(wsi_paths, jobs, delete=False, verbose=False):
             
             # Use a larger number of points to be more thorough.
             # 500 points at ~0.001s-0.01s each is ~0.5-5 seconds per slide.
-            n_trial_reads = 500
+            n_trial_reads = 1000
             
             # Distribution across levels: mostly level 0, but some higher levels
             levels_to_check = [0]
