@@ -360,6 +360,50 @@ def verify_slides_in_parallel(wsi_paths, jobs, delete=False, verbose=False):
                 # but TRIDENT's OpenSlideWSI raises for it.
                 raise ValueError("Missing magnification metadata")
 
+            # 4. Try to get a thumbnail (checks global structure and base-level readability)
+            try:
+                _ = slide.get_thumbnail((512, 512))
+            except Exception as e:
+                raise ValueError(f"Failed to generate thumbnail (Data Corruption?): {e}")
+
+            # 5. Trial read_region (checks if pixel data can be decoded)
+            # We check multiple random points to catch sparse corruption
+            # (especially common in NDPI or network-interrupted downloads)
+            import random
+            
+            # Use a larger number of points to be more thorough.
+            # 500 points at ~0.001s-0.01s each is ~0.5-5 seconds per slide.
+            n_trial_reads = 500
+            
+            # Distribution across levels: mostly level 0, but some higher levels
+            levels_to_check = [0]
+            if slide.level_count > 1:
+                levels_to_check.extend([1, min(2, slide.level_count - 1)])
+            
+            # Always check a patch at the very end of the slide (typical for truncation)
+            w, h = slide.dimensions
+            tail_points = [
+                (max(0, w - 256), max(0, h - 256)), # Bottom-right
+                (max(0, w // 2), max(0, h - 256)),   # Bottom-center
+            ]
+            for x, y in tail_points:
+                _ = slide.read_region((x, y), 0, (224, 224))
+
+            # Random sampling
+            for _ in range(n_trial_reads):
+                lvl = random.choice(levels_to_check)
+                lw, lh = slide.level_dimensions[lvl]
+                
+                # Pick random location in current level
+                x = random.randint(0, max(0, lw - 256))
+                y = random.randint(0, max(0, lh - 256))
+                
+                # Note: read_region location is always in level 0 coordinates
+                ds = slide.level_downsamples[lvl]
+                loc_level0 = (int(x * ds), int(y * ds))
+                
+                _ = slide.read_region(loc_level0, lvl, (224, 224))
+
             slide.close()
             is_valid = True
         except Exception as e:
