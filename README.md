@@ -1,4 +1,4 @@
-# Patho-Bench-dl
+# Patho-Bench-cli
 
 Unified downloader for [Patho-Bench](https://github.com/mahmoodlab/Patho-Bench) datasets.
 
@@ -40,29 +40,31 @@ patho-bench-cli list idr
 
 ```bash
 # Download CPTAC slides needed for Patho-Bench (dry-run, creates manifest)
-patho-bench-cli download cptac
+patho-bench-cli download cptac -o /path/to/slides
 
 # Actually download
-patho-bench-cli download cptac --download
+patho-bench-cli download cptac --download -o /path/to/slides
 
 # Download specific datasets
-patho-bench-cli download cptac --datasets cptac_ccrcc cptac_brca --download
+patho-bench-cli download cptac --datasets cptac_ccrcc cptac_brca --download -o /path/to/slides
 
 # Download with per-task symlinks
-patho-bench-cli download cptac --download --create-symlinks
+patho-bench-cli download cptac --download --create-symlinks -o /path/to/slides
 
 # Download PANDA slides
-patho-bench-cli download panda --download
+patho-bench-cli download panda --download -o /path/to/slides
 
 # Download Ovarian Bevacizumab Response slides
-patho-bench-cli download ovarian_bevacizumab --download
+patho-bench-cli download ovarian_bevacizumab --download -o /path/to/slides
 
 # Download POST-NAT-BRCA slides
-patho-bench-cli download post_nat_brca --download
+patho-bench-cli download post_nat_brca --download -o /path/to/slides
 
 # Download IDR slides (via BioImage Archive)
-patho-bench-cli download idr --download
+patho-bench-cli download idr --download -o /path/to/slides
 ```
+
+Note that not including --datasets will download all datasets for the provider.
 
 ### Full dataset download
 
@@ -89,6 +91,16 @@ patho-bench-cli verify /path/to/slides --delete
 # Use specific number of parallel jobs
 patho-bench-cli verify /path/to/slides --jobs 8
 ```
+
+### Embed slides
+
+Embed slides using a patch encoder. This will create a directory of embeddings for each dataset. If you point it at the same slides
+
+```bash
+patho-bench-cli embed cptac --datasets cptac_ccrcc--slides-dir /path/to/slides --embeddings-dir /path/to/embeddings --patch_encoder open-midnight --create-symlinks --mag 20 --patch_size 224
+```
+
+Note that not including --datasets will embed all datasets for the provider. If you point it at the by_task directory created by the download command and include --create-symlinks, it will create a by_task directory in the embeddings directory where each dataset directory has task directories with symlinks to the embeddings/dataset directory. It embeds all by_task slides into the same embeddings/dataset directory in order to avoid duplicate slide embeddings.
 
 ## Data Sources
 
