@@ -5,18 +5,21 @@ Usage:
     patho-bench-cli list [PROVIDER]        List available providers/datasets
     patho-bench-cli download PROVIDER      Download slides from a provider
     patho-bench-cli tasks                  Download Patho-Bench task definitions
+    patho-bench-cli embed PROVIDER         Generate embeddings for dataset tasks
     patho-bench-cli verify TARGET_DIR     Verify WSI files in a directory
 """
 
 import argparse
 import sys
 import os
+import subprocess
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 
 import datasets
 import openslide
+import pandas as pd
 
 from patho_bench_cli.providers import get_provider, list_providers
 
@@ -435,18 +438,212 @@ def cmd_verify(args):
         verbose=args.verbose
     )
 
-    print(f"\nVerification Results:")
-    print(f"  Total:  {len(wsi_paths)}")
-    print(f"  Passed: {len(passed)}")
-    print(f"  Failed: {len(failed)}")
-
     if failed:
         print("\nFailed Slides:")
         for path, error, deleted in failed:
             status = " [DELETED]" if deleted else ""
             print(f"  {path}: {error}{status}")
 
+    print(f"\nVerification Results:")
+    print(f"  Total:  {len(wsi_paths)}")
+    print(f"  Passed: {len(passed)}")
+    print(f"  Failed: {len(failed)}")
+
     return 1 if failed else 0
+
+
+def create_embedding_symlinks(
+    embeddings_dir: Path,
+    by_task_dir: Path,
+    dataset: str,
+    task: str,
+    slide_ids: set[str]
+) -> int:
+    """
+    Create symlinks from embeddings/by_task/DATASET/TASK to embeddings/DATASET
+    for the necessary slide IDs.
+
+    Args:
+        embeddings_dir: Base embeddings directory (e.g., /embeddings/PATCH_ENCODER/DATASET)
+        by_task_dir: Task-specific symlink directory (e.g., /embeddings/PATCH_ENCODER/by_task/DATASET/TASK)
+        dataset: Dataset name
+        task: Task name
+        slide_ids: Set of slide IDs to create symlinks for
+
+    Returns:
+        Number of symlinks created
+    """
+    by_task_dir.mkdir(parents=True, exist_ok=True)
+
+    # Common embedding file extensions from TRIDENT
+    extensions = ['.h5', '.pt']
+
+    symlinks_created = 0
+    for slide_id in slide_ids:
+        for ext in extensions:
+            src_file = embeddings_dir / f"{slide_id}{ext}"
+            if src_file.exists():
+                dst_file = by_task_dir / f"{slide_id}{ext}"
+                if not dst_file.exists():
+                    dst_file.symlink_to(src_file)
+                    symlinks_created += 1
+                break
+
+    return symlinks_created
+
+
+def cmd_embed(args):
+    """Handle the 'embed' subcommand - generate embeddings using TRIDENT."""
+    try:
+        provider = get_provider(args.provider)
+    except KeyError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+    tasks_dir = Path(args.tasks_dir)
+    slides_dir = Path(args.slides_dir)
+    embeddings_dir = Path(args.embeddings_dir)
+
+    if not tasks_dir.exists():
+        print(f"Error: Tasks directory not found: {tasks_dir}", file=sys.stderr)
+        print("Run 'patho-bench-cli tasks' to download task definitions first.", file=sys.stderr)
+        return 1
+
+    if not slides_dir.exists():
+        print(f"Error: Slides directory not found: {slides_dir}", file=sys.stderr)
+        print("Make sure you've downloaded slides with 'patho-bench-cli download --create-symlinks'", file=sys.stderr)
+        return 1
+
+    # Get all tasks for the provider
+    all_tasks = provider.list_tasks(tasks_dir)
+
+    # Filter by datasets if specified
+    if args.datasets:
+        all_tasks = [t for t in all_tasks if t['dataset'] in args.datasets]
+
+    # Filter by specific tasks if specified
+    if args.tasks:
+        all_tasks = [t for t in all_tasks if t['task'] in args.tasks]
+
+    if not all_tasks:
+        print("No tasks found matching the specified criteria.", file=sys.stderr)
+        return 1
+
+    print(f"Provider: {provider.name}")
+    print(f"Patch encoder: {args.patch_encoder}")
+    print(f"Magnification: {args.mag}x")
+    print(f"Patch size: {args.patch_size}px")
+    print(f"Tasks to process: {len(all_tasks)}")
+
+    # Group tasks by dataset
+    tasks_by_dataset = {}
+    for task in all_tasks:
+        dataset = task['dataset']
+        if dataset not in tasks_by_dataset:
+            tasks_by_dataset[dataset] = []
+        tasks_by_dataset[dataset].append(task)
+
+    # Find TRIDENT script
+    trident_script = Path(__file__).parent.parent / "TRIDENT" / "run_batch_of_slides.py"
+    if not trident_script.exists():
+        print(f"Error: TRIDENT script not found at {trident_script}", file=sys.stderr)
+        return 1
+
+    # Process each dataset
+    total_success = 0
+    total_failed = 0
+
+    for dataset, tasks in tasks_by_dataset.items():
+        print(f"\n{'='*60}")
+        print(f"Processing dataset: {dataset}")
+        print(f"{'='*60}")
+
+        for task_info in tasks:
+            task = task_info['task']
+            print(f"\nTask: {task} ({task_info['n_slides']} slides)")
+
+            # Define paths
+            task_slides_dir = slides_dir / dataset / task
+            dataset_embeddings_dir = embeddings_dir / args.patch_encoder / dataset
+            task_embeddings_symlinks_dir = embeddings_dir / args.patch_encoder / "by_task" / dataset / task
+
+            if not task_slides_dir.exists():
+                print(f"  Warning: Slides directory not found: {task_slides_dir}", file=sys.stderr)
+                print(f"  Skipping task {task}", file=sys.stderr)
+                total_failed += 1
+                continue
+
+            # Create embeddings directory
+            dataset_embeddings_dir.mkdir(parents=True, exist_ok=True)
+
+            # Build TRIDENT command using current Python interpreter
+            cmd = [
+                sys.executable,  # Use the current Python interpreter
+                str(trident_script),
+                "--task", "all",
+                "--wsi_dir", str(task_slides_dir),
+                "--job_dir", str(dataset_embeddings_dir),
+                "--patch_encoder", args.patch_encoder,
+                "--mag", str(args.mag),
+                "--patch_size", str(args.patch_size),
+            ]
+
+            # Add optional arguments
+            if args.gpu is not None:
+                cmd.extend(["--gpu", str(args.gpu)])
+            if args.batch_size:
+                cmd.extend(["--batch_size", str(args.batch_size)])
+            if args.skip_errors:
+                cmd.append("--skip_errors")
+
+            print(f"  Running TRIDENT...")
+            print(f"  Command: {' '.join(cmd)}")
+
+            try:
+                result = subprocess.run(
+                    cmd,
+                    cwd=trident_script.parent,
+                    check=True,
+                    capture_output=not args.verbose
+                )
+                print(f"  ✓ TRIDENT completed successfully")
+                total_success += 1
+            except subprocess.CalledProcessError as e:
+                print(f"  ✗ TRIDENT failed with exit code {e.returncode}", file=sys.stderr)
+                if args.verbose and e.stdout:
+                    print(f"  stdout: {e.stdout.decode()}", file=sys.stderr)
+                if args.verbose and e.stderr:
+                    print(f"  stderr: {e.stderr.decode()}", file=sys.stderr)
+                total_failed += 1
+                continue
+
+            # Create symlinks
+            if args.create_symlinks:
+                print(f"  Creating symlinks...")
+                # Read slide IDs from the task file
+                task_file = tasks_dir / dataset / task / "k=all.tsv"
+                if task_file.exists():
+                    task_df = pd.read_csv(task_file, sep='\t')
+                    slide_ids = set(task_df['slide_id'].unique())
+
+                    n_symlinks = create_embedding_symlinks(
+                        embeddings_dir=dataset_embeddings_dir,
+                        by_task_dir=task_embeddings_symlinks_dir,
+                        dataset=dataset,
+                        task=task,
+                        slide_ids=slide_ids
+                    )
+                    print(f"  ✓ Created {n_symlinks} symlinks")
+                else:
+                    print(f"  Warning: Task file not found: {task_file}", file=sys.stderr)
+
+    print(f"\n{'='*60}")
+    print(f"Embedding generation complete!")
+    print(f"  Successful: {total_success}")
+    print(f"  Failed: {total_failed}")
+    print(f"{'='*60}")
+
+    return 1 if total_failed > 0 else 0
 
 
 def main():
@@ -573,7 +770,84 @@ def main():
         action="store_true",
         help="Show library warnings"
     )
-    
+
+    # --- embed subcommand ---
+    embed_parser = subparsers.add_parser(
+        "embed",
+        help="Generate embeddings for dataset tasks using TRIDENT"
+    )
+    embed_parser.add_argument(
+        "provider",
+        help="Provider name (e.g., 'cptac', 'panda')"
+    )
+    embed_parser.add_argument(
+        "-d", "--datasets",
+        nargs="+",
+        help="Specific dataset(s) to embed (default: all for provider)"
+    )
+    embed_parser.add_argument(
+        "-t", "--tasks",
+        nargs="+",
+        help="Specific tasks to embed (default: all tasks for selected datasets)"
+    )
+    embed_parser.add_argument(
+        "--slides-dir",
+        type=str,
+        default="./slides/by_task",
+        help="Base directory containing slide symlinks organized by task (default: ./slides/by_task)"
+    )
+    embed_parser.add_argument(
+        "--embeddings-dir",
+        type=str,
+        default="./embeddings",
+        help="Base directory for embeddings output (default: ./embeddings)"
+    )
+    embed_parser.add_argument(
+        "--patch-encoder",
+        type=str,
+        default="conch_v15",
+        help="Patch encoder to use (default: conch_v15)"
+    )
+    embed_parser.add_argument(
+        "--mag",
+        type=int,
+        choices=[5, 10, 20, 40, 80],
+        default=20,
+        help="Magnification for feature extraction (default: 20)"
+    )
+    embed_parser.add_argument(
+        "--patch-size",
+        type=int,
+        default=224,
+        help="Patch size for feature extraction (default: 224)"
+    )
+    embed_parser.add_argument(
+        "--gpu",
+        type=int,
+        default=0,
+        help="GPU index to use (default: 0)"
+    )
+    embed_parser.add_argument(
+        "--batch-size",
+        type=int,
+        help="Batch size for feature extraction (default: TRIDENT's default)"
+    )
+    embed_parser.add_argument(
+        "--skip-errors",
+        action="store_true",
+        help="Skip errored slides and continue processing"
+    )
+    embed_parser.add_argument(
+        "--create-symlinks",
+        action="store_true",
+        help="Create per-task symlink directories for embeddings"
+    )
+    embed_parser.add_argument(
+        "-v", "--verbose",
+        action="store_true",
+        help="Show TRIDENT output"
+    )
+
     args = parser.parse_args()
     
     if args.command is None:
@@ -587,6 +861,8 @@ def main():
         return cmd_download(args)
     elif args.command == "tasks":
         return cmd_tasks(args)
+    elif args.command == "embed":
+        return cmd_embed(args)
     elif args.command == "verify":
         return cmd_verify(args)
     else:
