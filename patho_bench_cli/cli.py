@@ -532,15 +532,36 @@ def create_embedding_symlinks(
     extensions = ['.h5', '.pt']
 
     symlinks_created = 0
+    # Create a mapping of slide_id to actual file to handle nested TRIDENT structure
+    # (e.g., dataset/20x_224px/features_uni_v1/slide_id.h5)
+    found_files = {}
+    
+    # We use rglob to find all .h5 and .pt files
+    for ext in extensions:
+        for f in embeddings_dir.rglob(f"*{ext}"):
+            # Check if this file name starts with one of our slide IDs
+            # TRIDENT might save as slide_id.h5 or slide_id.svs.h5
+            stem = f.name.split('.')[0]
+            if stem in slide_ids:
+                if stem not in found_files:
+                    found_files[stem] = f
+                else:
+                    # If multiple files exist, prefer the one with the shortest path 
+                    # (it might be closer to root) or just take the first one we found
+                    pass
+
     for slide_id in slide_ids:
-        for ext in extensions:
-            src_file = embeddings_dir / f"{slide_id}{ext}"
-            if src_file.exists():
-                dst_file = by_task_dir / f"{slide_id}{ext}"
-                if not dst_file.exists():
-                    dst_file.symlink_to(src_file)
-                    symlinks_created += 1
-                break
+        if slide_id in found_files:
+            src_file = found_files[slide_id]
+            # Use original extension from source file
+            ext = src_file.suffix
+            dst_file = by_task_dir / f"{slide_id}{ext}"
+            
+            if not dst_file.exists():
+                # We want the symlink to be relative if possible, but absolute is safer for now
+                # given how the directories are structured
+                dst_file.symlink_to(src_file.resolve())
+                symlinks_created += 1
 
     return symlinks_created
 
