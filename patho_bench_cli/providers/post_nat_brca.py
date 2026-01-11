@@ -42,8 +42,11 @@ class PostNatBrcaProvider(DatasetProvider):
         return [output_dir / POST_NAT_BRCA_COLLECTION]
     
     def _get_all_tsv_files(self, tasks_dir: Path) -> list[Path]:
-        """Find all k=all.tsv files in the tasks directory."""
-        return list(tasks_dir.glob("**/k=all.tsv"))
+        """Find all k=all.tsv files in the natbrca tasks directory."""
+        natbrca_tasks_path = tasks_dir / "natbrca"
+        if not natbrca_tasks_path.exists():
+            return []
+        return list(natbrca_tasks_path.glob("**/k=all.tsv"))
     
     def _extract_slide_ids_from_tsv(self, tsv_path: Path) -> pd.DataFrame:
         """Extract case_id and slide_id from a TSV file."""

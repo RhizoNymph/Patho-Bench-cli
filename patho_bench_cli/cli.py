@@ -684,7 +684,7 @@ def cmd_embed(args):
                     # Read slide IDs from the task file
                     task_file = tasks_dir / dataset / task / "k=all.tsv"
                     if task_file.exists():
-                        task_df = pd.read_csv(task_file, sep='\t')
+                        task_df = pd.read_csv(task_file, sep='\t', dtype={'slide_id': str})
                         slide_ids = set(task_df['slide_id'].unique())
 
                         n_symlinks = create_embedding_symlinks(
