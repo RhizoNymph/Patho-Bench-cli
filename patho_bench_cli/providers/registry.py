@@ -45,6 +45,9 @@ def _auto_register():
     from patho_bench_cli.providers.post_nat_brca import PostNatBrcaProvider
     from patho_bench_cli.providers.idr import IDRProvider
     from patho_bench_cli.providers.bcnb import BCNBProvider
+    from patho_bench_cli.providers.bioimage import BioimageProvider
+    from patho_bench_cli.providers.hancock import HancockProvider
+    from patho_bench_cli.providers.boehmk import BoehmkProvider
     
     register_provider(CPTACProvider())
     register_provider(PANDAProvider())
@@ -53,6 +56,9 @@ def _auto_register():
     register_provider(PostNatBrcaProvider())
     register_provider(IDRProvider())
     register_provider(BCNBProvider())
+    register_provider(BioimageProvider())
+    register_provider(HancockProvider())
+    register_provider(BoehmkProvider())
 
 
 _auto_register()
