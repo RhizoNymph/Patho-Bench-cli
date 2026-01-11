@@ -18,7 +18,7 @@ POST_NAT_BRCA_COLLECTION = "Post-NAT-BRCA"
 
 # Mapping from Patho-Bench dataset names to TCIA collection names
 POST_NAT_BRCA_COLLECTION_MAP = {
-    "post_nat_brca": POST_NAT_BRCA_COLLECTION,
+    "natbrca": POST_NAT_BRCA_COLLECTION,
 }
 
 
@@ -27,7 +27,7 @@ class PostNatBrcaProvider(DatasetProvider):
     
     @property
     def name(self) -> str:
-        return "post_nat_brca"
+        return "natbrca"
     
     @property
     def description(self) -> str:
