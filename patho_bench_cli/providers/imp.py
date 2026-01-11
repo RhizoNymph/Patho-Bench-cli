@@ -66,6 +66,10 @@ class IMPProvider(DatasetProvider):
     @property
     def datasets(self) -> list[str]:
         return ["imp"]
+
+    def get_storage_directories(self, output_dir: Path, datasets: list[str] | None = None) -> list[Path]:
+        """Get the imp subdirectory."""
+        return [output_dir / "imp"]
     
     def _get_all_tsv_files(self, tasks_dir: Path) -> list[Path]:
         """Find all k=all.tsv files in the tasks directory."""
@@ -294,7 +298,8 @@ class IMPProvider(DatasetProvider):
         **kwargs
     ) -> None:
         """Download specific IMP slides concurrently."""
-        output_dir.mkdir(parents=True, exist_ok=True)
+        imp_dir = output_dir / "imp"
+        imp_dir.mkdir(parents=True, exist_ok=True)
         
         # Build list of downloads needed
         downloads = []
@@ -302,7 +307,7 @@ class IMPProvider(DatasetProvider):
         
         for slide_id in sorted(slide_ids):
             filename = f"{slide_id}{SLIDE_EXTENSION}"
-            target_path = output_dir / filename
+            target_path = imp_dir / filename
             
             if target_path.exists():
                 skipped += 1
@@ -311,14 +316,14 @@ class IMPProvider(DatasetProvider):
             downloads.append((slide_id, target_path))
         
         if skipped > 0:
-            logger.info(f"Skipping {skipped} already downloaded slides")
+            logger.info(f"Skipping {skipped} already downloaded slides in {imp_dir}")
         
         if downloads:
-            logger.info(f"Downloading {len(downloads)} slides with {self.concurrent_downloads} concurrent connections...")
+            logger.info(f"Downloading {len(downloads)} slides to {imp_dir} with {self.concurrent_downloads} concurrent connections...")
             downloaded, failed, failed_ids = asyncio.run(self._download_slides_async(downloads))
             logger.info(f"Download complete. Downloaded: {downloaded}, Skipped: {skipped}, Failed: {failed}")
         else:
-            logger.info("All slides already downloaded")
+            logger.info(f"All slides already downloaded in {imp_dir}")
         
         # Create symlinks
         if create_symlinks and tasks_dir:
@@ -374,6 +379,7 @@ class IMPProvider(DatasetProvider):
     def _create_symlinks(self, tasks_dir: Path, slides_dir: Path) -> None:
         """Create per-task symlink directories."""
         task_slide_ids = self.get_slide_ids_for_tasks(tasks_dir)
+        imp_dir = slides_dir / "imp"
         
         for task_key, slide_ids in task_slide_ids.items():
             task_dir = slides_dir / "by_task" / task_key
@@ -381,7 +387,7 @@ class IMPProvider(DatasetProvider):
             
             symlink_count = 0
             for slide_id in slide_ids:
-                source_file = slides_dir / f"{slide_id}{SLIDE_EXTENSION}"
+                source_file = imp_dir / f"{slide_id}{SLIDE_EXTENSION}"
                 if source_file.exists():
                     symlink_path = task_dir / source_file.name
                     if not symlink_path.exists():
