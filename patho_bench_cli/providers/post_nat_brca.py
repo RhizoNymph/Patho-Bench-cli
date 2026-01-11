@@ -47,7 +47,7 @@ class PostNatBrcaProvider(DatasetProvider):
     
     def _extract_slide_ids_from_tsv(self, tsv_path: Path) -> pd.DataFrame:
         """Extract case_id and slide_id from a TSV file."""
-        df = pd.read_csv(tsv_path, sep="\t")
+        df = pd.read_csv(tsv_path, sep="\t", dtype={"case_id": str, "slide_id": str})
         if "slide_id" in df.columns and "case_id" in df.columns:
             return df[["case_id", "slide_id"]].drop_duplicates()
         return pd.DataFrame(columns=["case_id", "slide_id"])
