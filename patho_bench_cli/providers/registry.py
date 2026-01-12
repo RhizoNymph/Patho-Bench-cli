@@ -49,6 +49,7 @@ def _auto_register():
     from patho_bench_cli.providers.hancock import HancockProvider
     from patho_bench_cli.providers.boehmk import BoehmkProvider
     from patho_bench_cli.providers.imp_cervical import IMPCervicalProvider
+    from patho_bench_cli.providers.dhmc import DHMCProvider
 
     register_provider(CPTACProvider())
     register_provider(PANDAProvider())
@@ -61,6 +62,7 @@ def _auto_register():
     register_provider(HancockProvider())
     register_provider(BoehmkProvider())
     register_provider(IMPCervicalProvider())
+    register_provider(DHMCProvider())
 
 
 _auto_register()
