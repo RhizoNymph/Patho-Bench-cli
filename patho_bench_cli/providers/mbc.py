@@ -150,8 +150,8 @@ class MBCProvider(DatasetProvider):
             task_dir.mkdir(parents=True, exist_ok=True)
 
             symlink_count = 0
-            # MBC slides are SVS files
-            extensions = {'.svs'}
+            # MBC slides are ndpi files
+            extensions = {'.ndpi'}
 
             # Convert slide IDs to strings for robust comparison with filenames
             task_slide_ids_str = {str(sid) for sid in task_slide_ids}
