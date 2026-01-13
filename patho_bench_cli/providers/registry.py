@@ -51,6 +51,7 @@ def _auto_register():
     from patho_bench_cli.providers.imp_cervical import IMPCervicalProvider
     from patho_bench_cli.providers.dhmc import DHMCProvider
     from patho_bench_cli.providers.bracs import BRACSProvider
+    from patho_bench_cli.providers.mbc import MBCProvider
 
     register_provider(CPTACProvider())
     register_provider(PANDAProvider())
@@ -65,6 +66,7 @@ def _auto_register():
     register_provider(IMPCervicalProvider())
     register_provider(DHMCProvider())
     register_provider(BRACSProvider())
+    register_provider(MBCProvider())
 
 
 _auto_register()
