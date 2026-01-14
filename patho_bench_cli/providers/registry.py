@@ -53,6 +53,7 @@ def _auto_register():
     from patho_bench_cli.providers.bracs import BRACSProvider
     from patho_bench_cli.providers.mbc import MBCProvider
     from patho_bench_cli.providers.mut_het_rcc import MutHetRccProvider
+    from patho_bench_cli.providers.nadt_prostate import NADTProstateProvider
 
     register_provider(CPTACProvider())
     register_provider(PANDAProvider())
@@ -69,6 +70,7 @@ def _auto_register():
     register_provider(BRACSProvider())
     register_provider(MBCProvider())
     register_provider(MutHetRccProvider())
+    register_provider(NADTProstateProvider())
 
 
 _auto_register()
