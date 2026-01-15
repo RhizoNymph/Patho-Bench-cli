@@ -676,6 +676,8 @@ def cmd_embed(args):
                     cmd.extend(["--batch_size", str(args.batch_size)])
                 if args.skip_errors:
                     cmd.append("--skip_errors")
+                if args.wsi_ext:
+                    cmd.extend(["--wsi_ext"] + args.wsi_ext)
 
                 print(f"  Running TRIDENT...")
                 if args.verbose:
@@ -918,6 +920,11 @@ def main():
         "--skip-errors",
         action="store_true",
         help="Skip errored slides and continue processing"
+    )
+    embed_parser.add_argument(
+        "--wsi-ext",
+        nargs="+",
+        help="WSI file extensions to include (e.g., --wsi-ext .czi .svs)"
     )
     embed_parser.add_argument(
         "--create-symlinks",
