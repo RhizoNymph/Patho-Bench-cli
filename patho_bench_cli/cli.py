@@ -644,7 +644,7 @@ def cmd_embed(args):
                 print(f"\nTask: {task} ({task_info['n_slides']} slides)")
 
                 # Define paths
-                task_slides_dir = slides_dir / dataset / task
+                task_slides_dir = slides_dir / "by_task" / dataset / task
                 dataset_embeddings_dir = embeddings_dir / args.patch_encoder / dataset
                 task_embeddings_symlinks_dir = embeddings_dir / args.patch_encoder / "by_task" / dataset / task
 
