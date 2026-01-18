@@ -6,7 +6,8 @@ Usage:
     patho-bench-cli download PROVIDER      Download slides from a provider
     patho-bench-cli tasks                  Download Patho-Bench task definitions
     patho-bench-cli embed PROVIDER         Generate embeddings for dataset tasks
-    patho-bench-cli verify TARGET_DIR     Verify WSI files in a directory
+    patho-bench-cli verify TARGET_DIR      Verify WSI files in a directory
+    patho-bench-cli bench                  Run Patho-Bench benchmarking
 """
 
 import argparse
@@ -730,6 +731,142 @@ def cmd_embed(args):
     return 1 if total_failed > 0 else 0
 
 
+def cmd_bench(args):
+    """Handle the 'bench' subcommand - run Patho-Bench benchmarking."""
+    # Find the Patho-Bench run script
+    patho_bench_script = Path(__file__).parent.parent / "Patho-Bench" / "advanced_usage" / "run.py"
+    if not patho_bench_script.exists():
+        print(f"Error: Patho-Bench run script not found at {patho_bench_script}", file=sys.stderr)
+        return 1
+
+    # Determine venv path - use provided or default to root .venv
+    if args.venv:
+        venv_path = Path(args.venv)
+    else:
+        venv_path = Path(__file__).parent.parent / ".venv" / "bin" / "activate"
+
+    if not venv_path.exists():
+        print(f"Error: Virtual environment not found at {venv_path}", file=sys.stderr)
+        print("Please provide --venv path or ensure .venv exists in the project root.", file=sys.stderr)
+        return 1
+
+    # Expand experiment types
+    ALL_EXPERIMENT_TYPES = ["linprobe", "coxnet", "retrieval", "finetune"]
+
+    if "all" in args.experiment_type:
+        experiment_types = ALL_EXPERIMENT_TYPES
+    else:
+        experiment_types = args.experiment_type
+
+    # Track results for each experiment
+    results = {}
+    use_subdirs = len(experiment_types) > 1
+
+    print(f"Running Patho-Bench benchmarking...")
+    print(f"  Experiment type(s): {', '.join(experiment_types)}")
+    print(f"  Model(s): {', '.join(args.model_name)}")
+    print(f"  Save to: {args.saveto}")
+    if use_subdirs:
+        print(f"  (Results will be saved to subdirectories per experiment type)")
+
+    for exp_type in experiment_types:
+        print(f"\n{'='*60}")
+        print(f"Running experiment: {exp_type}")
+        print(f"{'='*60}")
+
+        # Determine saveto path - use subdir when running multiple experiments
+        if use_subdirs:
+            exp_saveto = str(Path(args.saveto) / exp_type)
+        else:
+            exp_saveto = args.saveto
+
+        # Build command for this experiment type
+        cmd = [
+            sys.executable,
+            str(patho_bench_script),
+            "--experiment_type", exp_type,
+            "--model_name", *args.model_name,
+            "--saveto", exp_saveto,
+            "--venv", str(venv_path),
+        ]
+
+        # Add hyperparams_yaml
+        if args.hyperparams_yaml:
+            cmd.extend(["--hyperparams_yaml", args.hyperparams_yaml])
+        else:
+            # Use default config based on experiment type
+            default_config = patho_bench_script.parent / "configs" / exp_type / f"{exp_type}.yaml"
+            if default_config.exists():
+                cmd.extend(["--hyperparams_yaml", str(default_config)])
+            else:
+                print(f"Error: No hyperparams_yaml provided and default config not found at {default_config}", file=sys.stderr)
+                results[exp_type] = False
+                continue
+
+        # Add tasks_yaml
+        if args.tasks_yaml:
+            cmd.extend(["--tasks_yaml", args.tasks_yaml])
+        else:
+            default_tasks = patho_bench_script.parent / "configs" / "tasks.yaml"
+            if default_tasks.exists():
+                cmd.extend(["--tasks_yaml", str(default_tasks)])
+
+        # Add optional arguments
+        if args.pooled_dirs_yaml:
+            cmd.extend(["--pooled_dirs_yaml", args.pooled_dirs_yaml])
+        if args.patch_dirs_yaml:
+            cmd.extend(["--patch_dirs_yaml", args.patch_dirs_yaml])
+        if args.splits_root:
+            cmd.extend(["--splits_root", args.splits_root])
+        if args.model_kwargs_yaml:
+            cmd.extend(["--model_kwargs_yaml", args.model_kwargs_yaml])
+        if args.combine_slides_per_patient is not None:
+            cmd.extend(["--combine_slides_per_patient", str(args.combine_slides_per_patient)])
+        if args.tmux_id:
+            # Append experiment type to tmux_id to avoid conflicts
+            tmux_id = f"{args.tmux_id}_{exp_type}" if use_subdirs else args.tmux_id
+            cmd.extend(["--tmux_id", tmux_id])
+        if args.preserve:
+            cmd.append("--preserve")
+        if args.delay_interval != 2:
+            cmd.extend(["--delay_interval", str(args.delay_interval)])
+        if args.global_delay != 0:
+            cmd.extend(["--global_delay", str(args.global_delay)])
+        if args.gpu != -1:
+            cmd.extend(["--gpu", str(args.gpu)])
+
+        if args.verbose:
+            print(f"  Command: {' '.join(cmd)}")
+
+        try:
+            subprocess.run(
+                cmd,
+                cwd=patho_bench_script.parent,
+                check=True,
+                capture_output=not args.verbose
+            )
+            print(f"  {exp_type}: launched successfully!")
+            results[exp_type] = True
+        except subprocess.CalledProcessError as e:
+            print(f"  {exp_type}: failed with exit code {e.returncode}", file=sys.stderr)
+            if e.stdout:
+                print(f"  stdout: {e.stdout.decode()}", file=sys.stderr)
+            if e.stderr:
+                print(f"  stderr: {e.stderr.decode()}", file=sys.stderr)
+            results[exp_type] = False
+
+    # Print summary
+    print(f"\n{'='*60}")
+    print("Benchmarking Summary")
+    print(f"{'='*60}")
+    for exp_type, success in results.items():
+        status = "success" if success else "FAILED"
+        print(f"  {exp_type}: {status}")
+
+    failed_count = sum(1 for success in results.values() if not success)
+    return 1 if failed_count > 0 else 0
+
+
 def main():
     """Main CLI entry point."""
     parser = argparse.ArgumentParser(
@@ -937,6 +1074,106 @@ def main():
         help="Show TRIDENT output"
     )
 
+    # --- bench subcommand ---
+    bench_parser = subparsers.add_parser(
+        "bench",
+        help="Run Patho-Bench benchmarking using the Patho-Bench run script"
+    )
+    bench_parser.add_argument(
+        "--experiment-type",
+        type=str,
+        nargs='+',
+        choices=["linprobe", "coxnet", "retrieval", "finetune", "all"],
+        required=True,
+        help="Type(s) of experiment to run. Use 'all' to run all experiment types sequentially."
+    )
+    bench_parser.add_argument(
+        "--model-name",
+        type=str,
+        nargs='+',
+        required=True,
+        help="Name(s) of the model(s) to use. Multiple models will run in parallel."
+    )
+    bench_parser.add_argument(
+        "--saveto",
+        type=str,
+        required=True,
+        help="Save results to this directory"
+    )
+    bench_parser.add_argument(
+        "--hyperparams-yaml",
+        type=str,
+        help="Path to config YAML specifying hyperparameters (default: configs/{experiment_type}/{experiment_type}.yaml)"
+    )
+    bench_parser.add_argument(
+        "--tasks-yaml",
+        type=str,
+        help="Path to the YAML file containing the task codes (default: configs/tasks.yaml)"
+    )
+    bench_parser.add_argument(
+        "--pooled-dirs-yaml",
+        type=str,
+        help="Path to YAML file mapping data sources to pooled embeddings directories"
+    )
+    bench_parser.add_argument(
+        "--patch-dirs-yaml",
+        type=str,
+        help="Path to YAML file mapping data sources to patch embeddings directories"
+    )
+    bench_parser.add_argument(
+        "--splits-root",
+        type=str,
+        help="Root directory for downloading splits from HuggingFace"
+    )
+    bench_parser.add_argument(
+        "--model-kwargs-yaml",
+        type=str,
+        help="Path to YAML file containing optional kwargs for initializing the model"
+    )
+    bench_parser.add_argument(
+        "--combine-slides-per-patient",
+        type=lambda x: x.lower() == 'true',
+        help="Whether to combine patches from multiple slides when pooling at case_id level"
+    )
+    bench_parser.add_argument(
+        "--venv",
+        type=str,
+        help="Path to the virtual environment activate script (default: .venv/bin/activate)"
+    )
+    bench_parser.add_argument(
+        "--tmux-id",
+        type=str,
+        help="Optional tmux session name"
+    )
+    bench_parser.add_argument(
+        "--preserve",
+        action="store_true",
+        help="Preserve the finished tmux panes"
+    )
+    bench_parser.add_argument(
+        "--delay-interval",
+        type=float,
+        default=2,
+        help="Factor by which to delay each pane (default: 2)"
+    )
+    bench_parser.add_argument(
+        "--global-delay",
+        type=int,
+        default=0,
+        help="Delay the whole study in minutes (default: 0)"
+    )
+    bench_parser.add_argument(
+        "--gpu",
+        type=int,
+        default=-1,
+        help="GPU to use for pooling. If -1, the best available GPU is used (default: -1)"
+    )
+    bench_parser.add_argument(
+        "-v", "--verbose",
+        action="store_true",
+        help="Show command and full output"
+    )
+
     args = parser.parse_args()
     
     if args.command is None:
@@ -954,6 +1191,8 @@ def main():
         return cmd_embed(args)
     elif args.command == "verify":
         return cmd_verify(args)
+    elif args.command == "bench":
+        return cmd_bench(args)
     else:
         parser.print_help()
         return 1
