@@ -507,6 +507,51 @@ def cmd_verify(args):
     return 1 if failed else 0
 
 
+def update_embed_status_csv(
+    status_csv_path: Path,
+    dataset: str,
+    task: str,
+    status: str
+) -> None:
+    """
+    Update the embed status CSV with the result for a dataset/task.
+
+    If the dataset/task already exists in the CSV, it will be overwritten.
+    If not, a new row will be added.
+
+    Args:
+        status_csv_path: Path to the status CSV file
+        dataset: Dataset name
+        task: Task name
+        status: Status string (e.g., "success", "failed", "skipped")
+    """
+    # Read existing CSV if it exists
+    if status_csv_path.exists():
+        df = pd.read_csv(status_csv_path, dtype=str)
+    else:
+        df = pd.DataFrame(columns=["Dataset", "Task", "Status"])
+
+    # Check if this dataset/task combination exists
+    mask = (df["Dataset"] == dataset) & (df["Task"] == task)
+
+    if mask.any():
+        # Update existing row
+        df.loc[mask, "Status"] = status
+    else:
+        # Add new row
+        new_row = pd.DataFrame([{"Dataset": dataset, "Task": task, "Status": status}])
+        df = pd.concat([df, new_row], ignore_index=True)
+
+    # Sort by Dataset, then Task for consistent ordering
+    df = df.sort_values(["Dataset", "Task"]).reset_index(drop=True)
+
+    # Ensure parent directory exists
+    status_csv_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Write back
+    df.to_csv(status_csv_path, index=False)
+
+
 def create_embedding_symlinks(
     embeddings_dir: Path,
     by_task_dir: Path,
@@ -573,6 +618,7 @@ def cmd_embed(args):
     tasks_dir = Path(args.tasks_dir)
     slides_dir = Path(args.slides_dir)
     embeddings_dir = Path(args.embeddings_dir)
+    status_csv_path = Path(args.status_csv)
 
     if args.provider == 'all':
         if args.datasets:
@@ -653,6 +699,7 @@ def cmd_embed(args):
                 if not task_slides_dir.exists():
                     print(f"  Warning: Slides directory not found: {task_slides_dir}", file=sys.stderr)
                     print(f"  Skipping task {task}", file=sys.stderr)
+                    update_embed_status_csv(status_csv_path, dataset, task, "skipped: slides dir not found")
                     total_failed += 1
                     continue
 
@@ -693,6 +740,7 @@ def cmd_embed(args):
                         capture_output=not args.verbose
                     )
                     print(f"  ✓ TRIDENT completed successfully")
+                    update_embed_status_csv(status_csv_path, dataset, task, "success")
                     total_success += 1
                 except subprocess.CalledProcessError as e:
                     print(f"  ✗ TRIDENT failed with exit code {e.returncode}", file=sys.stderr)
@@ -700,6 +748,7 @@ def cmd_embed(args):
                         print(f"  stdout: {e.stdout.decode()}", file=sys.stderr)
                     if args.verbose and e.stderr:
                         print(f"  stderr: {e.stderr.decode()}", file=sys.stderr)
+                    update_embed_status_csv(status_csv_path, dataset, task, f"failed: exit code {e.returncode}")
                     total_failed += 1
                     continue
 
@@ -727,6 +776,7 @@ def cmd_embed(args):
     print(f"Embedding generation complete!")
     print(f"  Successful: {total_success}")
     print(f"  Failed: {total_failed}")
+    print(f"  Status CSV: {status_csv_path}")
     print(f"{'='*60}")
 
     return 1 if total_failed > 0 else 0
@@ -1076,6 +1126,12 @@ def main():
         "-v", "--verbose",
         action="store_true",
         help="Show TRIDENT output"
+    )
+    embed_parser.add_argument(
+        "--status-csv",
+        type=str,
+        default="./embed_status.csv",
+        help="Path to CSV file tracking embed status per dataset/task (default: ./embed_status.csv)"
     )
 
     # --- bench subcommand ---
