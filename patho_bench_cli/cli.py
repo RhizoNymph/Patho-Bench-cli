@@ -21,6 +21,7 @@ from contextlib import contextmanager
 import datasets
 import openslide
 import pandas as pd
+from dotenv import load_dotenv
 
 from patho_bench_cli.providers import get_provider, list_providers
 
@@ -869,6 +870,9 @@ def cmd_bench(args):
 
 def main():
     """Main CLI entry point."""
+    # Load environment variables from .env file
+    load_dotenv()
+
     parser = argparse.ArgumentParser(
         prog="patho-bench-cli",
         description="Unified downloader for Patho-Bench datasets",

@@ -55,6 +55,7 @@ def _auto_register():
     from patho_bench_cli.providers.mut_het_rcc import MutHetRccProvider
     from patho_bench_cli.providers.nadt_prostate import NADTProstateProvider
     from patho_bench_cli.providers.visiomel import VisioMelProvider
+    from patho_bench_cli.providers.ebrains import EBRAINSProvider
 
     register_provider(CPTACProvider())
     register_provider(PANDAProvider())
@@ -73,6 +74,7 @@ def _auto_register():
     register_provider(MutHetRccProvider())
     register_provider(NADTProstateProvider())
     register_provider(VisioMelProvider())
+    register_provider(EBRAINSProvider())
 
 
 _auto_register()

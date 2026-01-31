@@ -14,6 +14,7 @@ dependencies = [
     "aiolimiter>=1.1.0",
     "datasets>=3.6.0",
     "dotenv>=0.9.9",
+    "ebrains_drive>=0.6.2",
     "huggingface-hub>=1.2.1",
     "kaggle>=1.8.2",
     "openslide-bin>=4.0.0.11",
