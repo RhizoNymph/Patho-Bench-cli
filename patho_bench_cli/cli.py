@@ -146,7 +146,7 @@ def cmd_list(args):
 def cmd_download(args):
     """Handle the 'download' subcommand."""
     tasks_dir = Path(args.tasks_dir)
-    output_dir = Path(args.output_dir)
+    output_dir = Path(args.slides_dir)
 
     if args.provider == 'all':
         if args.datasets:
@@ -965,7 +965,7 @@ def main():
         help="Specific dataset(s) to download (default: all for provider)"
     )
     download_parser.add_argument(
-        "-o", "--output-dir",
+        "--slides-dir",
         type=str,
         default="./slides",
         help="Output directory for slides (default: ./slides)"
