@@ -967,8 +967,8 @@ def main():
     download_parser.add_argument(
         "--slides-dir",
         type=str,
-        default="./slides",
-        help="Output directory for slides (default: ./slides)"
+        default=os.environ.get("SLIDES_DIR", "./slides"),
+        help="Output directory for slides (default: ./slides, or SLIDES_DIR env var)"
     )
     download_parser.add_argument(
         "--full",
@@ -1068,14 +1068,14 @@ def main():
     embed_parser.add_argument(
         "--slides-dir",
         type=str,
-        default="./slides/by_task",
-        help="Base directory containing slide symlinks organized by task (default: ./slides/by_task)"
+        default=os.environ.get("SLIDES_DIR", "./slides"),
+        help="Base slides directory containing by_task/ subdirectory (default: ./slides, or SLIDES_DIR env var)"
     )
     embed_parser.add_argument(
         "--embeddings-dir",
         type=str,
-        default="./embeddings",
-        help="Base directory for embeddings output (default: ./embeddings)"
+        default=os.environ.get("EMBEDDINGS_DIR", "./embeddings"),
+        help="Base directory for embeddings output (default: ./embeddings, or EMBEDDINGS_DIR env var)"
     )
     embed_parser.add_argument(
         "--patch-encoder",
