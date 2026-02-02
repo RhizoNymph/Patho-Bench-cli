@@ -1080,8 +1080,8 @@ def main():
     embed_parser.add_argument(
         "--patch-encoder",
         type=str,
-        default="conch_v15",
-        help="Patch encoder to use (default: conch_v15)"
+        default=os.environ.get("PATCH_ENCODER", "conch_v15"),
+        help="Patch encoder to use (default: conch_v15, or PATCH_ENCODER env var)"
     )
     embed_parser.add_argument(
         "--mag",
