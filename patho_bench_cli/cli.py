@@ -728,12 +728,40 @@ def cmd_embed(args):
                 if args.wsi_ext:
                     cmd.extend(["--wsi_ext"] + args.wsi_ext)
 
+                # If MPP is provided, create a temporary CSV for TRIDENT
+                # This is needed for standard image formats (JPG, PNG) that lack MPP metadata
+                mpp_csv_path = None
+                if args.mpp is not None:
+                    # List all slide files in the task slides directory
+                    slide_extensions = {'.svs', '.tif', '.tiff', '.ndpi', '.mrxs', '.scn',
+                                        '.bif', '.vms', '.vmu', '.jpg', '.jpeg', '.png'}
+                    if args.wsi_ext:
+                        slide_extensions = set(args.wsi_ext)
+
+                    slide_files = []
+                    for f in task_slides_dir.iterdir():
+                        if f.is_file() or f.is_symlink():
+                            if f.suffix.lower() in slide_extensions:
+                                slide_files.append(f.name)
+
+                    if slide_files:
+                        # Create temp CSV with wsi and mpp columns
+                        mpp_df = pd.DataFrame({
+                            'wsi': slide_files,
+                            'mpp': [args.mpp] * len(slide_files)
+                        })
+                        mpp_csv_path = task_slides_dir / "_mpp_list.csv"
+                        mpp_df.to_csv(mpp_csv_path, index=False)
+                        cmd.extend(["--custom_list_of_wsis", str(mpp_csv_path)])
+                        if args.verbose:
+                            print(f"  Created MPP CSV with {len(slide_files)} slides at mpp={args.mpp}")
+
                 print(f"  Running TRIDENT...")
                 if args.verbose:
                     print(f"  Command: {' '.join(cmd)}")
 
                 try:
-                    result = subprocess.run(
+                    subprocess.run(
                         cmd,
                         cwd=trident_script.parent,
                         check=True,
@@ -751,6 +779,10 @@ def cmd_embed(args):
                     update_embed_status_csv(status_csv_path, dataset, task, f"failed: exit code {e.returncode}")
                     total_failed += 1
                     continue
+                finally:
+                    # Clean up temp MPP CSV
+                    if mpp_csv_path and mpp_csv_path.exists():
+                        mpp_csv_path.unlink()
 
                 # Create symlinks
                 if args.create_symlinks:
@@ -1116,6 +1148,11 @@ def main():
         "--wsi-ext",
         nargs="+",
         help="WSI file extensions to include (e.g., --wsi-ext .czi .svs)"
+    )
+    embed_parser.add_argument(
+        "--mpp",
+        type=float,
+        help="Microns per pixel (required for standard image formats like JPG/PNG that lack MPP metadata)"
     )
     embed_parser.add_argument(
         "--create-symlinks",
