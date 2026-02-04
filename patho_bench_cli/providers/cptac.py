@@ -16,14 +16,14 @@ logger = logging.getLogger(__name__)
 # Mapping from Patho-Bench dataset names to TCIA collection names
 CPTAC_COLLECTION_MAP = {
     "cptac_ccrcc": "CPTAC-CCRCC",
-    "cptac_ccrcc_dhmc": "CPTAC-CCRCC",  # Same collection, different task subset
+    "cptac_ccrcc_dhmc": "KidneyCancer", 
     "cptac_brca": "CPTAC-BRCA",
     "cptac_coad": "CPTAC-COAD",
     "cptac_gbm": "CPTAC-GBM",
     "cptac_hnsc": "CPTAC-HNSCC",
     "cptac_lscc": "CPTAC-LSCC",
     "cptac_luad": "CPTAC-LUAD",
-    "cptac_lung": None,  # Combined dataset - need both LUAD and LSCC
+    "cptac_lung": "LungCancer",  
     "cptac_ov": "CPTAC-OV",
     "cptac_pda": "CPTAC-PDA",
     "cptac_ucec": "CPTAC-UCEC",
