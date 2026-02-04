@@ -389,9 +389,13 @@ class CPTACProvider(DatasetProvider):
                 collection_dirs = [slides_dir / collection]
 
             # Filter to existing directories
-            collection_dirs = [d for d in collection_dirs if d.exists()]
-            if not collection_dirs:
+            existing_dirs = [d for d in collection_dirs if d.exists()]
+            missing_dirs = [d for d in collection_dirs if not d.exists()]
+            if missing_dirs:
+                logger.warning(f"Dataset {dataset_name}: missing directories {[str(d) for d in missing_dirs]}")
+            if not existing_dirs:
                 continue
+            collection_dirs = existing_dirs
 
             # Get slide IDs needed for this specific task
             slide_df = self._extract_slide_ids_from_tsv(tsv_path)
@@ -416,8 +420,10 @@ class CPTACProvider(DatasetProvider):
                     if img_file.is_file():
                         # Check if this file belongs to a case_id in this task
                         filename_stem = img_file.stem
-                        # Try to match by case_id (file might be named like {case_id}.svs)
-                        file_case_id = filename_stem.split("-")[0] if "-" in filename_stem else filename_stem
+                        # Extract case_id from filename using same logic as slide_id parsing
+                        # (format: {case_id}-{suffix} where case_id may contain hyphens)
+                        parts = filename_stem.rsplit("-", 1)
+                        file_case_id = parts[0] if len(parts) == 2 else filename_stem
                         if file_case_id in task_case_ids or filename_stem in task_slide_ids:
                             symlink_path = task_dir / img_file.name
                             if not symlink_path.exists():
