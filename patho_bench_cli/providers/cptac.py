@@ -13,17 +13,20 @@ from patho_bench_cli.utils import download_file_with_retry, DEFAULT_MAX_RETRIES
 logging.basicConfig()
 logger = logging.getLogger(__name__)
 
+# Collections that must be downloaded manually (not available via TCIA API)
+MANUAL_DOWNLOAD_COLLECTIONS = {"KidneyCancer"}
+
 # Mapping from Patho-Bench dataset names to TCIA collection names
 CPTAC_COLLECTION_MAP = {
     "cptac_ccrcc": "CPTAC-CCRCC",
-    "cptac_ccrcc_dhmc": "KidneyCancer", 
+    "cptac_ccrcc_dhmc": [ "CPTAC-CCRCC", "KidneyCancer" ],  # Combined dataset - Needs both  CPTAC-CCRCC and DHMC Kidney Cancer datasets
     "cptac_brca": "CPTAC-BRCA",
     "cptac_coad": "CPTAC-COAD",
     "cptac_gbm": "CPTAC-GBM",
     "cptac_hnsc": "CPTAC-HNSCC",
     "cptac_lscc": "CPTAC-LSCC",
     "cptac_luad": "CPTAC-LUAD",
-    "cptac_lung": "LungCancer",  
+    "cptac_lung": [ "CPTAC-LUAD", "CPTAC-LSCC" ],  # Combined dataset - need both LUAD and LSCC
     "cptac_ov": "CPTAC-OV",
     "cptac_pda": "CPTAC-PDA",
     "cptac_ucec": "CPTAC-UCEC",
@@ -53,15 +56,18 @@ class CPTACProvider(DatasetProvider):
         for ds in target_datasets:
             coll = CPTAC_COLLECTION_MAP.get(ds)
             if coll:
-                collections.add(coll)
-            elif ds == "cptac_lung":
-                collections.add("CPTAC-LUAD")
-                collections.add("CPTAC-LSCC")
+                if isinstance(coll, list):
+                    collections.update(coll)
+                else:
+                    collections.add(coll)
             elif ds == "cptac_all":
                 for c in CPTAC_COLLECTION_MAP.values():
                     if c:
-                        collections.add(c)
-        
+                        if isinstance(c, list):
+                            collections.update(c)
+                        else:
+                            collections.add(c)
+
         return [output_dir / coll for coll in sorted(collections)]
     
     def _get_all_tsv_files(self, tasks_dir: Path) -> list[Path]:
@@ -251,13 +257,22 @@ class CPTACProvider(DatasetProvider):
             for ds in datasets:
                 collection = CPTAC_COLLECTION_MAP.get(ds)
                 if collection:
-                    collections_needed.add(collection)
+                    if isinstance(collection, list):
+                        collections_needed.update(collection)
+                    else:
+                        collections_needed.add(collection)
         else:
             # Query all known collections
             for collection in CPTAC_COLLECTION_MAP.values():
                 if collection:
-                    collections_needed.add(collection)
-        
+                    if isinstance(collection, list):
+                        collections_needed.update(collection)
+                    else:
+                        collections_needed.add(collection)
+
+        # Exclude collections that must be downloaded manually
+        collections_needed -= MANUAL_DOWNLOAD_COLLECTIONS
+
         logger.info(f"Querying TCIA collections: {collections_needed}")
         
         # Query and download from each collection
@@ -308,12 +323,21 @@ class CPTACProvider(DatasetProvider):
             for ds in datasets:
                 collection = CPTAC_COLLECTION_MAP.get(ds)
                 if collection:
-                    collections_needed.add(collection)
+                    if isinstance(collection, list):
+                        collections_needed.update(collection)
+                    else:
+                        collections_needed.add(collection)
         else:
             for collection in CPTAC_COLLECTION_MAP.values():
                 if collection:
-                    collections_needed.add(collection)
-        
+                    if isinstance(collection, list):
+                        collections_needed.update(collection)
+                    else:
+                        collections_needed.add(collection)
+
+        # Exclude collections that must be downloaded manually
+        collections_needed -= MANUAL_DOWNLOAD_COLLECTIONS
+
         logger.info(f"Downloading full collections: {collections_needed}")
         
         for collection in sorted(collections_needed):
@@ -348,24 +372,31 @@ class CPTACProvider(DatasetProvider):
         for tsv_path in self._get_all_tsv_files(tasks_dir):
             dataset_name = tsv_path.parent.parent.name
             task_name = tsv_path.parent.name
-            
+
             if not dataset_name.startswith("cptac"):
                 continue
             if datasets and dataset_name not in datasets:
                 continue
-            
+
             collection = CPTAC_COLLECTION_MAP.get(dataset_name)
             if not collection:
                 continue
-            
-            collection_dir = slides_dir / collection
-            if not collection_dir.exists():
+
+            # Handle both single collection (str) and combined datasets (list)
+            if isinstance(collection, list):
+                collection_dirs = [slides_dir / c for c in collection]
+            else:
+                collection_dirs = [slides_dir / collection]
+
+            # Filter to existing directories
+            collection_dirs = [d for d in collection_dirs if d.exists()]
+            if not collection_dirs:
                 continue
-            
+
             # Get slide IDs needed for this specific task
             slide_df = self._extract_slide_ids_from_tsv(tsv_path)
             task_slide_ids = set(slide_df["slide_id"].unique())
-            
+
             # Extract case_ids from slide_ids for matching (format: {case_id}-{suffix})
             task_case_ids = set()
             for sid in task_slide_ids:
@@ -374,22 +405,24 @@ class CPTACProvider(DatasetProvider):
                     task_case_ids.add(parts[0])
                 else:
                     task_case_ids.add(sid)
-            
+
             task_dir = slides_dir / "by_task" / dataset_name / task_name
             task_dir.mkdir(parents=True, exist_ok=True)
-            
+
             symlink_count = 0
-            for img_file in collection_dir.glob("*"):
-                if img_file.is_file():
-                    # Check if this file belongs to a case_id in this task
-                    filename_stem = img_file.stem
-                    # Try to match by case_id (file might be named like {case_id}.svs)
-                    file_case_id = filename_stem.split("-")[0] if "-" in filename_stem else filename_stem
-                    if file_case_id in task_case_ids or filename_stem in task_slide_ids:
-                        symlink_path = task_dir / img_file.name
-                        if not symlink_path.exists():
-                            symlink_path.symlink_to(img_file.resolve())
-                            symlink_count += 1
-            
+            # Iterate through all collection directories for combined datasets
+            for collection_dir in collection_dirs:
+                for img_file in collection_dir.glob("*"):
+                    if img_file.is_file():
+                        # Check if this file belongs to a case_id in this task
+                        filename_stem = img_file.stem
+                        # Try to match by case_id (file might be named like {case_id}.svs)
+                        file_case_id = filename_stem.split("-")[0] if "-" in filename_stem else filename_stem
+                        if file_case_id in task_case_ids or filename_stem in task_slide_ids:
+                            symlink_path = task_dir / img_file.name
+                            if not symlink_path.exists():
+                                symlink_path.symlink_to(img_file.resolve())
+                                symlink_count += 1
+
             if symlink_count > 0:
                 logger.info(f"  {dataset_name}/{task_name}: {symlink_count} symlinks")
