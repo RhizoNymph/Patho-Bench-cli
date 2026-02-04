@@ -299,11 +299,9 @@ class EBRAINSProvider(DatasetProvider):
         """Download specific EBRAINS slides."""
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        # Check which slides already exist locally
-        existing_slide_ids = set()
-        for slide_id in slide_ids:
-            if (output_dir / f"{slide_id}{SLIDE_EXTENSION}").exists():
-                existing_slide_ids.add(slide_id)
+        # Check which slides already exist locally (search recursively)
+        found_slides = self._find_existing_slides(output_dir, slide_ids)
+        existing_slide_ids = set(found_slides.keys())
 
         missing_slide_ids = slide_ids - existing_slide_ids
 
@@ -394,12 +392,13 @@ class EBRAINSProvider(DatasetProvider):
 
             ndpi_files = [f for f in all_files if f["name"].endswith(SLIDE_EXTENSION)]
 
-            # Check which files already exist
+            # Check which files already exist (search recursively)
+            existing_slides = self._find_existing_slides(output_dir)
             existing_count = 0
             missing_files = []
             for f in ndpi_files:
-                filename = Path(f["name"]).name
-                if (output_dir / filename).exists():
+                slide_id = Path(f["name"]).stem
+                if slide_id in existing_slides:
                     existing_count += 1
                 else:
                     missing_files.append(f)
@@ -467,9 +466,34 @@ class EBRAINSProvider(DatasetProvider):
         if create_symlinks and tasks_dir:
             self._create_symlinks(tasks_dir, output_dir)
 
+    def _find_existing_slides(self, slides_dir: Path, slide_ids: set[str] | None = None) -> dict[str, Path]:
+        """Find existing slide files recursively in slides_dir.
+
+        Returns a mapping of slide_id -> file_path for found slides.
+        If slide_ids is provided, only searches for those specific slides.
+        """
+        found = {}
+        # Search recursively for .ndpi files, excluding by_task symlink directory
+        for slide_path in slides_dir.rglob(f"*{SLIDE_EXTENSION}"):
+            # Skip symlinks and the by_task directory
+            if slide_path.is_symlink() or "by_task" in slide_path.parts:
+                continue
+            slide_id = slide_path.stem
+            if slide_ids is None or slide_id in slide_ids:
+                found[slide_id] = slide_path
+        return found
+
     def _create_symlinks(self, tasks_dir: Path, slides_dir: Path) -> None:
         """Create per-task symlink directories."""
         task_slide_ids = self.get_slide_ids_for_tasks(tasks_dir)
+
+        # Collect all slide_ids we need to find
+        all_slide_ids = set()
+        for slide_ids in task_slide_ids.values():
+            all_slide_ids.update(slide_ids)
+
+        # Find all slides recursively
+        found_slides = self._find_existing_slides(slides_dir, all_slide_ids)
 
         for task_key, slide_ids in task_slide_ids.items():
             task_dir = slides_dir / "by_task" / task_key
@@ -477,8 +501,8 @@ class EBRAINSProvider(DatasetProvider):
 
             symlink_count = 0
             for slide_id in slide_ids:
-                source_file = slides_dir / f"{slide_id}{SLIDE_EXTENSION}"
-                if source_file.exists():
+                source_file = found_slides.get(slide_id)
+                if source_file and source_file.exists():
                     symlink_path = task_dir / source_file.name
                     if not symlink_path.exists():
                         symlink_path.symlink_to(source_file.resolve())
