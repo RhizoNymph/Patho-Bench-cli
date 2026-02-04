@@ -297,10 +297,26 @@ class EBRAINSProvider(DatasetProvider):
         **kwargs
     ) -> None:
         """Download specific EBRAINS slides."""
-        self._warn_access_required()
-
-        token = self._get_token()
         output_dir.mkdir(parents=True, exist_ok=True)
+
+        # Check which slides already exist locally
+        existing_slide_ids = set()
+        for slide_id in slide_ids:
+            if (output_dir / f"{slide_id}{SLIDE_EXTENSION}").exists():
+                existing_slide_ids.add(slide_id)
+
+        missing_slide_ids = slide_ids - existing_slide_ids
+
+        # If all slides exist, just create symlinks and return (no token needed)
+        if not missing_slide_ids:
+            logger.info(f"All {len(slide_ids)} slides already exist locally")
+            if create_symlinks and tasks_dir:
+                self._create_symlinks(tasks_dir, output_dir)
+            return
+
+        # Need to download some files - require token
+        self._warn_access_required()
+        token = self._get_token()
 
         # Use cache_dir for file list if not specified
         effective_cache_dir = cache_dir or output_dir / ".cache"
@@ -308,9 +324,9 @@ class EBRAINSProvider(DatasetProvider):
         # Fetch file list
         all_files = self._fetch_file_list(token, effective_cache_dir)
 
-        # Match slide_ids to files
-        files_to_download = self._match_slides_to_files(slide_ids, all_files)
-        logger.info(f"Found {len(files_to_download)} files matching {len(slide_ids)} requested slides")
+        # Match slide_ids to files (only missing ones need downloading)
+        files_to_download = self._match_slides_to_files(missing_slide_ids, all_files)
+        logger.info(f"Found {len(files_to_download)} files to download ({len(existing_slide_ids)} already exist)")
 
         if not files_to_download:
             logger.warning("No matching files found to download")
@@ -364,24 +380,58 @@ class EBRAINSProvider(DatasetProvider):
         **kwargs
     ) -> None:
         """Download complete EBRAINS dataset (all .ndpi files)."""
-        self._warn_access_required()
-
-        token = self._get_token()
         output_dir.mkdir(parents=True, exist_ok=True)
 
         # Use cache_dir for file list if not specified
         effective_cache_dir = cache_dir or output_dir / ".cache"
+        cache_file = effective_cache_dir / "ebrains_file_list.json"
 
-        # Fetch file list
-        all_files = self._fetch_file_list(token, effective_cache_dir)
+        # Check if we have a cached file list - allows symlink-only mode without token
+        if cache_file.exists():
+            logger.info(f"Loading cached file list from {cache_file}")
+            with open(cache_file) as f:
+                all_files = json.load(f)
 
-        # Filter to only .ndpi files
-        ndpi_files = [f for f in all_files if f["name"].endswith(SLIDE_EXTENSION)]
+            ndpi_files = [f for f in all_files if f["name"].endswith(SLIDE_EXTENSION)]
+
+            # Check which files already exist
+            existing_count = 0
+            missing_files = []
+            for f in ndpi_files:
+                filename = Path(f["name"]).name
+                if (output_dir / filename).exists():
+                    existing_count += 1
+                else:
+                    missing_files.append(f)
+
+            # If all files exist, just create symlinks and return (no token needed)
+            if not missing_files:
+                logger.info(f"All {len(ndpi_files)} slides already exist locally")
+                if create_symlinks and tasks_dir:
+                    self._create_symlinks(tasks_dir, output_dir)
+                return
+
+            logger.info(f"{existing_count} files exist, {len(missing_files)} need downloading")
+            ndpi_files = missing_files
+        else:
+            # No cache - need to fetch file list which requires token
+            self._warn_access_required()
+            token = self._get_token()
+
+            all_files = self._fetch_file_list(token, effective_cache_dir)
+            ndpi_files = [f for f in all_files if f["name"].endswith(SLIDE_EXTENSION)]
+
         logger.info(f"Found {len(ndpi_files)} .ndpi files to download")
 
         if not ndpi_files:
             logger.warning("No .ndpi files found in dataset")
+            if create_symlinks and tasks_dir:
+                self._create_symlinks(tasks_dir, output_dir)
             return
+
+        # Need to download - require token if we don't have it yet
+        self._warn_access_required()
+        token = self._get_token()
 
         # Download in parallel
         downloaded = 0
