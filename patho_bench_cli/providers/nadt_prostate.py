@@ -308,15 +308,18 @@ class NADTProstateProvider(DatasetProvider):
             task_dir.mkdir(parents=True, exist_ok=True)
 
             symlink_count = 0
+            existing_count = 0
             for slide_id in task_slide_ids:
                 if slide_id in available_files:
                     img_file = available_files[slide_id]
                     symlink_path = task_dir / img_file.name
-                    if not symlink_path.exists():
+                    if symlink_path.is_symlink() or symlink_path.exists():
+                        existing_count += 1
+                    else:
                         symlink_path.symlink_to(img_file.resolve())
                         symlink_count += 1
 
-            if symlink_count > 0:
-                logger.info(f"  {dataset_name}/{task_name}: {symlink_count} symlinks")
+            if symlink_count > 0 or existing_count > 0:
+                logger.info(f"  {dataset_name}/{task_name}: {symlink_count} new symlinks, {existing_count} already existed")
             else:
                 logger.warning(f"  {dataset_name}/{task_name}: No matching slides found (needed {len(task_slide_ids)}, available {len(available_files)})")
