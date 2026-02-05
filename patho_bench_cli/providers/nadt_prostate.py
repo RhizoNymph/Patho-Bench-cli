@@ -183,6 +183,7 @@ class NADTProstateProvider(DatasetProvider):
         create_symlinks: bool = False,
         tasks_dir: Path | None = None,
         cache_dir: Path | None = None,
+        datasets: list[str] | None = None,
         **kwargs
     ) -> None:
         """Download specific NADT-PROSTATE slides from TCIA."""
@@ -215,7 +216,7 @@ class NADTProstateProvider(DatasetProvider):
 
         # Create symlinks if requested
         if create_symlinks and tasks_dir:
-            self._create_symlinks(tasks_dir, output_dir)
+            self._create_symlinks(tasks_dir, output_dir, datasets)
 
     def download_full(
         self,
@@ -252,38 +253,58 @@ class NADTProstateProvider(DatasetProvider):
 
         # Create symlinks if requested
         if create_symlinks and tasks_dir:
-            self._create_symlinks(tasks_dir, output_dir)
+            self._create_symlinks(tasks_dir, output_dir, datasets)
 
     def _create_symlinks(
         self,
         tasks_dir: Path,
         slides_dir: Path,
+        datasets: list[str] | None = None
     ) -> None:
         """Create per-task symlink directories for NADT-PROSTATE slides."""
+        tsv_files = self._get_all_tsv_files(tasks_dir)
+        if not tsv_files:
+            logger.warning(f"No task TSV files found in {tasks_dir / 'nadt'}. Skipping symlink creation.")
+            return
+
         collection_dir = slides_dir / NADT_COLLECTION
         if not collection_dir.exists():
             logger.warning(f"NADT-PROSTATE slides directory not found at {collection_dir}. Skipping symlink creation.")
             return
 
-        for tsv_path in self._get_all_tsv_files(tasks_dir):
+        # Get all available files in collection directory
+        available_files = {f.stem: f for f in collection_dir.glob("*") if f.is_file()}
+        if not available_files:
+            logger.warning(f"No files found in {collection_dir}. Skipping symlink creation.")
+            return
+
+        for tsv_path in tsv_files:
+            dataset_name = tsv_path.parent.parent.name
             task_name = tsv_path.parent.name
+
+            # Only process nadt dataset
+            if dataset_name != "nadt":
+                continue
+            if datasets and dataset_name not in datasets:
+                continue
 
             # Get slide IDs needed for this specific task
             slide_df = self._extract_slide_ids_from_tsv(tsv_path)
             task_slide_ids = set(slide_df["slide_id"].unique())
 
-            task_dir = slides_dir / "by_task" / "nadt" / task_name
+            task_dir = slides_dir / "by_task" / dataset_name / task_name
             task_dir.mkdir(parents=True, exist_ok=True)
 
             symlink_count = 0
-            for img_file in collection_dir.glob("*"):
-                if img_file.is_file():
-                    # slide_id matches filename stem (e.g., 1022.Prostate.Bx1A.slide.01.HE)
-                    if img_file.stem in task_slide_ids:
-                        symlink_path = task_dir / img_file.name
-                        if not symlink_path.exists():
-                            symlink_path.symlink_to(img_file.resolve())
-                            symlink_count += 1
+            for slide_id in task_slide_ids:
+                if slide_id in available_files:
+                    img_file = available_files[slide_id]
+                    symlink_path = task_dir / img_file.name
+                    if not symlink_path.exists():
+                        symlink_path.symlink_to(img_file.resolve())
+                        symlink_count += 1
 
             if symlink_count > 0:
-                logger.info(f"  nadt/{task_name}: {symlink_count} symlinks")
+                logger.info(f"  {dataset_name}/{task_name}: {symlink_count} symlinks")
+            else:
+                logger.warning(f"  {dataset_name}/{task_name}: No matching slides found (needed {len(task_slide_ids)}, available {len(available_files)})")
