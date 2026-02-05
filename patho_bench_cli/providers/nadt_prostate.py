@@ -278,6 +278,11 @@ class NADTProstateProvider(DatasetProvider):
             logger.warning(f"No files found in {collection_dir}. Skipping symlink creation.")
             return
 
+        logger.info(f"Found {len(available_files)} files in {collection_dir}")
+        # Debug: show a sample of available file stems
+        sample_stems = list(available_files.keys())[:3]
+        logger.info(f"Sample file stems: {sample_stems}")
+
         for tsv_path in tsv_files:
             dataset_name = tsv_path.parent.parent.name
             task_name = tsv_path.parent.name
@@ -291,6 +296,13 @@ class NADTProstateProvider(DatasetProvider):
             # Get slide IDs needed for this specific task
             slide_df = self._extract_slide_ids_from_tsv(tsv_path)
             task_slide_ids = set(slide_df["slide_id"].unique())
+
+            # Debug: show sample slide IDs from task
+            sample_ids = list(task_slide_ids)[:3]
+            logger.info(f"Sample slide_ids from task: {sample_ids}")
+            # Check for any matches
+            matches = task_slide_ids & set(available_files.keys())
+            logger.info(f"Direct matches: {len(matches)} out of {len(task_slide_ids)}")
 
             task_dir = slides_dir / "by_task" / dataset_name / task_name
             task_dir.mkdir(parents=True, exist_ok=True)
