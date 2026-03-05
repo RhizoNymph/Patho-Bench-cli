@@ -26,7 +26,7 @@ CPTAC_COLLECTION_MAP = {
     "cptac_hnsc": "CPTAC-HNSCC",
     "cptac_lscc": "CPTAC-LSCC",
     "cptac_luad": "CPTAC-LUAD",
-    "cptac_lung": [ "CPTAC-LUAD", "CPTAC-LSCC" ],  # Combined dataset - need both LUAD and LSCC
+    "cptac_lung": [ "CPTAC-LUAD", "CPTAC-LSCC", "CPTAC-GBM" ],  # Combined dataset - need both LUAD and LSCC
     "cptac_ov": "CPTAC-OV",
     "cptac_pda": "CPTAC-PDA",
     "cptac_ucec": "CPTAC-UCEC",
