@@ -145,6 +145,30 @@ class DatasetProvider(ABC):
         
         return manifest_path
 
+    def get_custom_wsi_list(
+        self,
+        task_slides_dir: Path,
+        slides_dir: Path,
+        dataset: str,
+        task: str,
+    ) -> Path | None:
+        """
+        Get or generate a custom WSI list CSV for TRIDENT embedding.
+
+        Providers can override this to supply a per-task CSV with 'wsi' column
+        (and optionally 'mpp') to pass to TRIDENT's --custom_list_of_wsis.
+
+        Args:
+            task_slides_dir: Path to the by_task slides directory for this task.
+            slides_dir: Root slides directory.
+            dataset: Dataset name.
+            task: Task name.
+
+        Returns:
+            Path to the CSV, or None if not applicable.
+        """
+        return None
+
     def get_storage_directories(self, output_dir: Path, datasets: list[str] | None = None) -> list[Path]:
         """
         Get the directories where slides for the given datasets are stored.

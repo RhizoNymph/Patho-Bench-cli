@@ -728,10 +728,22 @@ def cmd_embed(args):
                 if args.wsi_ext:
                     cmd.extend(["--wsi_ext"] + args.wsi_ext)
 
-                # If MPP is provided, create a temporary CSV for TRIDENT
+                # Check for provider-specific custom WSI list (e.g., visiomel per-slide magnification)
+                custom_wsi_list = provider.get_custom_wsi_list(
+                    task_slides_dir=task_slides_dir,
+                    slides_dir=slides_dir,
+                    dataset=dataset,
+                    task=task,
+                )
+                if custom_wsi_list:
+                    cmd.extend(["--custom_list_of_wsis", str(custom_wsi_list)])
+                    if args.verbose:
+                        print(f"  Using custom WSI list: {custom_wsi_list}")
+
+                # If MPP is provided (and no custom WSI list), create a temporary CSV for TRIDENT
                 # This is needed for standard image formats (JPG, PNG) that lack MPP metadata
                 mpp_csv_path = None
-                if args.mpp is not None:
+                if args.mpp is not None and custom_wsi_list is None:
                     # List all slide files in the task slides directory
                     slide_extensions = {'.svs', '.tif', '.tiff', '.ndpi', '.mrxs', '.scn',
                                         '.bif', '.vms', '.vmu', '.jpg', '.jpeg', '.png'}

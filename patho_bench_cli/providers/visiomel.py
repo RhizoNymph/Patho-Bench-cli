@@ -127,6 +127,67 @@ class VisioMelProvider(DatasetProvider):
 
         self.download_slides(set(), output_dir, **kwargs)
 
+    def get_custom_wsi_list(
+        self,
+        task_slides_dir: Path,
+        slides_dir: Path,
+        dataset: str,
+        task: str,
+    ) -> Path | None:
+        """
+        Get or generate a custom WSI list CSV for TRIDENT embedding.
+
+        Uses _custom_wsi_list.csv in the task slides directory if it exists.
+        Otherwise, constructs it from clinical_variables_opendata_all_dataset.csv
+        by matching the filename and magnification fields against the symlinked
+        files in the task directory.
+        """
+        csv_path = task_slides_dir / "_custom_wsi_list.csv"
+        if csv_path.exists():
+            return csv_path
+
+        # Build from clinical variables CSV
+        clinical_csv = slides_dir / "visiomel" / "clinical_variables_opendata_all_dataset.csv"
+        if not clinical_csv.exists():
+            logger.warning(f"Clinical variables CSV not found at {clinical_csv}, skipping custom WSI list generation")
+            return None
+
+        clinical_df = pd.read_csv(clinical_csv)
+        if 'filename' not in clinical_df.columns or 'magnification' not in clinical_df.columns:
+            logger.warning(f"Clinical variables CSV missing 'filename' or 'magnification' columns")
+            return None
+
+        # Collect symlinked files in the task directory (stem -> actual filename)
+        symlinked_files: dict[str, str] = {}
+        for f in task_slides_dir.iterdir():
+            if (f.is_symlink() or f.is_file()) and not f.name.startswith('_'):
+                symlinked_files[f.stem] = f.name
+
+        if not symlinked_files:
+            return None
+
+        # Match clinical CSV rows against symlinked files
+        rows = []
+        for _, row in clinical_df.iterrows():
+            filename = str(row['filename'])
+            stem = Path(filename).stem
+            if stem in symlinked_files:
+                mpp = None
+                if pd.notna(row.get('magnification')):
+                    mag = float(row['magnification'])
+                    if mag > 0:
+                        mpp = 10.0 / mag
+                rows.append({'wsi': symlinked_files[stem], 'mpp': mpp})
+
+        if not rows:
+            logger.warning(f"No symlinked files matched clinical variables CSV for {dataset}/{task}")
+            return None
+
+        result_df = pd.DataFrame(rows)
+        result_df.to_csv(csv_path, index=False)
+        logger.info(f"Generated custom WSI list with {len(rows)} entries at {csv_path}")
+        return csv_path
+
     def _create_symlinks(
         self,
         tasks_dir: Path,
