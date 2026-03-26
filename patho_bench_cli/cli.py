@@ -364,12 +364,10 @@ def verify_slides_in_parallel(wsi_paths, jobs, delete=False, verbose=False):
             if mpp is None:
                 raise ValueError("Missing MPP (microns per pixel) metadata")
                 
-            # 3. Check for Magnification
+            # 3. Check for Magnification (warning only — not a failure)
             mag = get_mag(slide)
             if mag is None:
-                # Optional: Some workflows might proceed without mag, 
-                # but TRIDENT's OpenSlideWSI raises for it.
-                raise ValueError("Missing magnification metadata")
+                print(f"  Warning: {path.name} — Missing magnification metadata")
 
             # 4. Try to get a thumbnail (checks global structure and base-level readability)
             try:
@@ -898,13 +896,23 @@ def cmd_bench(args):
                 results[exp_type] = False
                 continue
 
-        # Add tasks_yaml
+        # Add tasks_yaml - auto-select based on experiment type if not provided
         if args.tasks_yaml:
             cmd.extend(["--tasks_yaml", args.tasks_yaml])
         else:
-            default_tasks = patho_bench_script.parent / "configs" / "tasks.yaml"
+            project_configs = Path(__file__).parent.parent / "configs"
+            SURVIVAL_TYPES = {"coxnet"}
+            if exp_type in SURVIVAL_TYPES:
+                default_tasks = project_configs / "tasks_survival.yaml"
+            else:
+                default_tasks = project_configs / "tasks_classification.yaml"
             if default_tasks.exists():
                 cmd.extend(["--tasks_yaml", str(default_tasks)])
+            else:
+                # Fall back to Patho-Bench default
+                fallback_tasks = patho_bench_script.parent / "configs" / "tasks.yaml"
+                if fallback_tasks.exists():
+                    cmd.extend(["--tasks_yaml", str(fallback_tasks)])
 
         # Add optional arguments
         if args.pooled_dirs_yaml:
@@ -1188,13 +1196,16 @@ def main():
         "bench",
         help="Run Patho-Bench benchmarking using the Patho-Bench run script"
     )
+    project_root = Path(__file__).parent.parent
+    default_configs = project_root / "configs"
+
     bench_parser.add_argument(
         "--experiment-type",
         type=str,
         nargs='+',
         choices=["linprobe", "coxnet", "retrieval", "finetune", "all"],
-        required=True,
-        help="Type(s) of experiment to run. Use 'all' to run all experiment types sequentially."
+        default=["all"],
+        help="Type(s) of experiment to run. Use 'all' to run all experiment types sequentially. (default: all)"
     )
     bench_parser.add_argument(
         "--model-name",
@@ -1206,33 +1217,41 @@ def main():
     bench_parser.add_argument(
         "--saveto",
         type=str,
-        required=True,
-        help="Save results to this directory"
+        default="./artifacts/bench",
+        help="Save results to this directory (default: ./artifacts/bench)"
     )
     bench_parser.add_argument(
         "--hyperparams-yaml",
         type=str,
-        help="Path to config YAML specifying hyperparameters (default: configs/{experiment_type}/{experiment_type}.yaml)"
+        help="Path to config YAML specifying hyperparameters (default: Patho-Bench/advanced_usage/configs/{experiment_type}/{experiment_type}.yaml)"
     )
     bench_parser.add_argument(
         "--tasks-yaml",
         type=str,
-        help="Path to the YAML file containing the task codes (default: configs/tasks.yaml)"
+        help="Path to the YAML file containing the task codes. If not provided, auto-selects "
+             "configs/tasks_classification.yaml for linprobe/retrieval/finetune and "
+             "configs/tasks_survival.yaml for coxnet."
     )
     bench_parser.add_argument(
         "--pooled-dirs-yaml",
         type=str,
-        help="Path to YAML file mapping data sources to pooled embeddings directories"
+        default=str(default_configs / "pooled_embeddings_paths.yaml"),
+        help="Path to YAML file mapping data sources to pooled embeddings directories "
+             "(default: configs/pooled_embeddings_paths.yaml)"
     )
     bench_parser.add_argument(
         "--patch-dirs-yaml",
         type=str,
-        help="Path to YAML file mapping data sources to patch embeddings directories"
+        default=str(default_configs / "patch_embeddings_paths.yaml"),
+        help="Path to YAML file mapping data sources to patch embeddings directories "
+             "(default: configs/patch_embeddings_paths.yaml)"
     )
     bench_parser.add_argument(
         "--splits-root",
         type=str,
-        help="Root directory for downloading splits from HuggingFace"
+        default=str(project_root / "Patho-Bench" / "artifacts" / "splits"),
+        help="Root directory for downloading splits from HuggingFace "
+             "(default: Patho-Bench/artifacts/splits)"
     )
     bench_parser.add_argument(
         "--model-kwargs-yaml",
@@ -1242,7 +1261,8 @@ def main():
     bench_parser.add_argument(
         "--combine-slides-per-patient",
         type=lambda x: x.lower() == 'true',
-        help="Whether to combine patches from multiple slides when pooling at case_id level"
+        default=False,
+        help="Whether to combine patches from multiple slides when pooling at case_id level (default: False)"
     )
     bench_parser.add_argument(
         "--venv",

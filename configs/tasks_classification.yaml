@@ -1,0 +1,31 @@
+# ==== Classification tasks (for linprobe, retrieval, finetune) ==== #
+# Excludes visiomel/sr386_ and survival (OS/PFS) endpoints
+
+## MORPHOLOGICAL SUBTYPING
+- ebrains--diagnosis ebrains--diagnosis_group
+- bracs--slidelevel_fine bracs--slidelevel_coarse
+
+## TUMOR GRADING
+- panda--isup_grade
+- imp--grade
+
+## MOLECULAR SUBTYPING
+- bcnb--er bcnb--pr bcnb--her2
+
+## MUTATION STATUS
+- cptac_brca--PIK3CA_mutation cptac_brca--TP53_mutation
+- cptac_ccrcc--BAP1_mutation cptac_ccrcc--PBRM1_mutation
+- cptac_coad--KRAS_mutation cptac_coad--TP53_mutation
+- cptac_gbm--EGFR_mutation cptac_gbm--TP53_mutation
+- cptac_hnsc--CASP8_mutation
+- cptac_lscc--KEAP1_mutation cptac_lscc--ARID1A_mutation
+- cptac_luad--EGFR_mutation cptac_luad--STK11_mutation
+- cptac_luad--TP53_mutation
+- cptac_pda--SMAD4_mutation
+- mut-het-rcc--BAP1_mutation mut-het-rcc--PBRM1_mutation mut-het-rcc--SETD2_mutation
+
+## TREATMENT RESPONSE
+- nadt--response
+- ovarian--response
+- natbrca--lymphovascular_invasion
+- mbc_--Recist

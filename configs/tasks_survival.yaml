@@ -1,0 +1,9 @@
+# ==== Survival tasks (for coxnet) ==== #
+# Excludes visiomel/sr386_
+
+- mbc_--OS
+- boehmk_--PFS
+- cptac_pda--OS
+- cptac_luad--OS
+- cptac_hnsc--OS
+- cptac_ccrcc--OS
